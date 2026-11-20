@@ -121,6 +121,15 @@ DEMO_SIGNING_SECRET=generate-a-random-value-at-least-32-characters-long
 DEMO_ACCESS_CODE=optional-private-invite-code
 ```
 
+**Hermes filesystem on Vercel:** Hermes writes local logs and session diagnostics to
+`HERMES_HOME`. Vercel functions cannot create directories under their read-only
+`/home` path; the backend automatically defaults `HERMES_HOME` to
+`/tmp/hermes-agent` when running on Vercel (or AWS Lambda), unless you explicitly
+set it. You may also configure `HERMES_HOME=/tmp/hermes-agent` in Vercel
+**Production** environment variables. `/tmp` is ephemeral per function instance:
+never store durable lead records or real bookings there. Local development
+continues to use Hermes' normal `~/.hermes` default.
+
 **Potential deploy blocker:** Hermes bundles substantial Python dependencies. Serverless cold starts, size and runtime constraints can prevent building or running on the free tier. If that occurs, keep Next.js on Vercel and deploy the Python process to a conventional Python host. That fallback requires adapting the same-origin API routing.
 
 Vercel's **Hobby plan is for personal, noncommercial use**; running this demo may still incur **OpenRouter API charges**. The demo access code is only a basic access barrier, not a global quota, anti-abuse or authentication system.

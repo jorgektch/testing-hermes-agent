@@ -3,8 +3,25 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 import threading
 from typing import Any
+
+
+def _configure_hermes_home() -> None:
+    """Keep Hermes logs/sessions on writable storage in serverless runtimes.
+
+    Hermes resolves HERMES_HOME while importing and initializing the agent.
+    Set it before any Hermes imports. Respect explicit deployer overrides and
+    leave local development's usual ~/.hermes default unchanged.
+    """
+    if os.environ.get('HERMES_HOME', '').strip():
+        return
+    if os.environ.get('VERCEL') or os.environ.get('AWS_LAMBDA_FUNCTION_NAME'):
+        os.environ['HERMES_HOME'] = os.path.join(tempfile.gettempdir(), 'hermes-agent')
+
+
+_configure_hermes_home()
 
 from . import domain
 
