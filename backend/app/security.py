@@ -12,6 +12,7 @@ import hmac
 import json
 import os
 import time
+import zlib
 
 SESSION_AGE_SECONDS = 60 * 60 * 48
 
@@ -26,6 +27,7 @@ def _secret() -> bytes:
 
 def sign(payload: dict) -> str:
     serialized = json.dumps({'payload': payload, 'issued_at': int(time.time())}, separators=(',', ':'), sort_keys=True).encode()
+    serialized = b'z' + zlib.compress(serialized, level=7)
     body = base64.urlsafe_b64encode(serialized).rstrip(b'=')
     signature = hmac.new(_secret(), body, hashlib.sha256).digest()
     return body.decode() + '.' + base64.urlsafe_b64encode(signature).rstrip(b'=').decode()
@@ -38,7 +40,14 @@ def verify(token: str) -> dict:
         received = base64.urlsafe_b64decode(supplied + '=' * (-len(supplied) % 4))
         if not hmac.compare_digest(expected, received):
             raise ValueError('Invalid session signature')
-        data = json.loads(base64.urlsafe_b64decode(body + '=' * (-len(body) % 4)))
+        data_bytes = base64.urlsafe_b64decode(body + '=' * (-len(body) % 4))
+        if len(data_bytes)>100_000 or not data_bytes.startswith(b'z'):
+            raise ValueError('Invalid token payload')
+        decompress=zlib.decompressobj()
+        raw=decompress.decompress(data_bytes[1:], max_length=700_000)
+        if not decompress.eof or decompress.unconsumed_tail or len(raw)>700_000:
+            raise ValueError('Session state too large')
+        data = json.loads(raw)
         if time.time() - data['issued_at'] > SESSION_AGE_SECONDS or data['issued_at'] > time.time() + 60:
             raise ValueError('Expired session')
         return data['payload']

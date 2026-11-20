@@ -1,0 +1,56 @@
+{
+  "schema_version": "hermes-demo-advisors/1.0",
+  "example_only": true,
+  "project_id": "22222222-2222-4222-8222-222222222222",
+  "timezone": "America/Lima",
+  "visit_duration_minutes": 45,
+  "buffer_minutes": 15,
+  "schedule_semantics": "schedule_template keys are offsets 1..14 days from runtime date (not calendar days-of-month)",
+  "sales_advisors": [
+    {
+      "advisor_id": "ADV-01",
+      "name": "Olivia Bennett",
+      "specialty": "Apartments and first-time residential buyers",
+      "schedule_template": {
+        "1": [
+          "08:00-14:00"
+        ],
+        "5": [
+          "09:00-13:00"
+        ]
+      },
+      "bp_sales_user_id": "87eb4580-5fc3-5a0a-bd87-d82ab12e0ca7"
+    },
+    {
+      "advisor_id": "ADV-02",
+      "name": "Daniel Rivera",
+      "specialty": "Family houses and premium residential homes",
+      "schedule_template": {
+        "3": [
+          "16:00-18:00"
+        ],
+        "7": [
+          "09:00-13:00"
+        ]
+      },
+      "bp_sales_user_id": "851dbc04-85b4-5439-82f9-39f285aae86f"
+    },
+    {
+      "advisor_id": "ADV-03",
+      "name": "Sophia Chen",
+      "specialty": "Property tours and neighborhood comparisons",
+      "schedule_template": {
+        "1": [
+          "10:00-14:00"
+        ],
+        "3": [
+          "09:00-13:00"
+        ],
+        "5": [
+          "16:00-18:00"
+        ]
+      },
+      "bp_sales_user_id": "b5121ace-089b-5ecb-ba2c-b05a8ab66764"
+    }
+  ]
+}

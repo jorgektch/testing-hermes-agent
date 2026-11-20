@@ -52,7 +52,7 @@ def svg_for(unit: dict, variant: int, ordinal: int) -> str:
     <rect x="0" y="620" width="1200" height="140" fill="#101a22" fill-opacity=".95"/>
     <text x="67" y="674" fill="{warm}" font-family="Arial,sans-serif" font-weight="bold" font-size="29" letter-spacing="2">{label}</text>
     <text x="68" y="710" fill="{accent}" font-family="Arial,sans-serif" font-size="17" letter-spacing="3">{code}   /   SYNTHETIC CONCEPT {variant + 1}   /   NOT A REAL PHOTO</text>
-    <text x="1034" y="78" text-anchor="middle" fill="#d7eee5" opacity=".7" font-family="Arial,sans-serif" font-size="16">EVERGREEN PARK</text></svg>'''
+    <text x="1034" y="78" text-anchor="middle" fill="#d7eee5" opacity=".7" font-family="Arial,sans-serif" font-size="16">JARDINES DEL SOL</text></svg>'''
 
 
 def build_pdf(file: Path, title: str, subtitle: str, rows: list[tuple[str, str]], highlights: list[str]):
@@ -63,7 +63,7 @@ def build_pdf(file: Path, title: str, subtitle: str, rows: list[tuple[str, str]]
         'body': ParagraphStyle('Body', fontName='Helvetica', fontSize=10, leading=16, textColor=colors.HexColor('#3c5358')),
         'label': ParagraphStyle('Label', fontName='Helvetica-Bold', fontSize=10, leading=16, textColor=colors.HexColor('#193e33')),
     }
-    blocks = [Paragraph('EVERGREEN PARK RESIDENCES', styles['label']), Spacer(1, 22),
+    blocks = [Paragraph(escape(CATALOG['project_info']['name'].upper()), styles['label']), Spacer(1, 22),
               Paragraph(escape(title), styles['title']), Paragraph(escape(subtitle), styles['body']), Spacer(1, 28),
               HRFlowable(width='100%', thickness=1, color=colors.HexColor('#8bbca4')), Spacer(1, 20)]
     table = Table([[k, str(v)] for k,v in rows], colWidths=[175, 300], hAlign='LEFT')
@@ -78,7 +78,7 @@ def build_pdf(file: Path, title: str, subtitle: str, rows: list[tuple[str, str]]
         blocks += [Paragraph('&bull; ' + escape(highlight), styles['body']), Spacer(1, 5)]
     blocks += [Spacer(1, 36), HRFlowable(width='100%', thickness=1, color=colors.HexColor('#d5e4db')), Spacer(1, 12),
                Paragraph('<b>DEMO ONLY</b> — Fictitious project, synthetic descriptions and illustration. '
-                         'This document is not a property floor plan, legal offer, or construction drawing. '
+                         'This document is not a real property floor plan, legal offer, or construction drawing. '
                          'Financing options are only discussed with a human advisor during an onsite visit.', styles['body'])]
     doc.build(blocks)
 

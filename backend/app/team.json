@@ -1,0 +1,108 @@
+{
+  "schema_version": "hermes-demo/team/2.0",
+  "example_only": true,
+  "company_id": "11111111-1111-4111-8111-111111111111",
+  "project_id": "22222222-2222-4222-8222-222222222222",
+  "users": [
+    {
+      "id": "87eb4580-5fc3-5a0a-bd87-d82ab12e0ca7",
+      "company_id": "11111111-1111-4111-8111-111111111111",
+      "first_name": "Olivia",
+      "last_name": "Bennett",
+      "display_name": "Olivia Bennett",
+      "role": "sales",
+      "is_active": true,
+      "auth_status": "active",
+      "timezone": "America/Lima",
+      "specialty": "Apartments and first-time residential buyers",
+      "demo_advisor_id": "ADV-01"
+    },
+    {
+      "id": "851dbc04-85b4-5439-82f9-39f285aae86f",
+      "company_id": "11111111-1111-4111-8111-111111111111",
+      "first_name": "Daniel",
+      "last_name": "Rivera",
+      "display_name": "Daniel Rivera",
+      "role": "sales",
+      "is_active": true,
+      "auth_status": "active",
+      "timezone": "America/Lima",
+      "specialty": "Family houses and premium residential homes",
+      "demo_advisor_id": "ADV-02"
+    },
+    {
+      "id": "b5121ace-089b-5ecb-ba2c-b05a8ab66764",
+      "company_id": "11111111-1111-4111-8111-111111111111",
+      "first_name": "Sophia",
+      "last_name": "Chen",
+      "display_name": "Sophia Chen",
+      "role": "sales",
+      "is_active": true,
+      "auth_status": "active",
+      "timezone": "America/Lima",
+      "specialty": "Property tours and neighborhood comparisons",
+      "demo_advisor_id": "ADV-03"
+    }
+  ],
+  "project_user_assignments": [
+    {
+      "id": "demo-assign-1",
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "user_id": "87eb4580-5fc3-5a0a-bd87-d82ab12e0ca7",
+      "responsibility": "sales",
+      "sales_enabled": true,
+      "marketing_enabled": false,
+      "accepts_appointments": true,
+      "accepts_new_leads": true,
+      "is_primary": true,
+      "routing_weight": 100,
+      "is_active": true
+    },
+    {
+      "id": "demo-assign-2",
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "user_id": "851dbc04-85b4-5439-82f9-39f285aae86f",
+      "responsibility": "sales",
+      "sales_enabled": true,
+      "marketing_enabled": false,
+      "accepts_appointments": true,
+      "accepts_new_leads": true,
+      "is_primary": false,
+      "routing_weight": 100,
+      "is_active": true
+    },
+    {
+      "id": "demo-assign-3",
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "user_id": "b5121ace-089b-5ecb-ba2c-b05a8ab66764",
+      "responsibility": "sales",
+      "sales_enabled": true,
+      "marketing_enabled": false,
+      "accepts_appointments": true,
+      "accepts_new_leads": false,
+      "is_primary": false,
+      "routing_weight": 100,
+      "is_active": true
+    },
+    {
+      "id": "demo-assign-other-project",
+      "project_id": "demo-secondary-project-same-company",
+      "user_id": "b5121ace-089b-5ecb-ba2c-b05a8ab66764",
+      "responsibility": "sales",
+      "sales_enabled": true,
+      "marketing_enabled": false,
+      "accepts_appointments": true,
+      "accepts_new_leads": false,
+      "is_primary": true,
+      "routing_weight": 100,
+      "is_active": true
+    }
+  ],
+  "related_project_fixtures": [
+    {
+      "id": "demo-secondary-project-same-company",
+      "company_id": "11111111-1111-4111-8111-111111111111",
+      "name": "Secondary example project (not published to the visitor)"
+    }
+  ]
+}

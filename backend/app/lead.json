@@ -1,0 +1,117 @@
+{
+  "_meta": {
+    "purpose": "Synthetic single-session BLANK lead/dialogue template",
+    "schema": "BlackPenguin current lead/dialogue shape, demo draft projection",
+    "source_contract_file": "BlackPenguin_Diccionario_Datos_Lead_y_Dialogo.md",
+    "example_only": true,
+    "not_a_database_row": true,
+    "note": "Real leads require full_name and phone. Null values are deliberate: an anonymous web demo does not fabricate them. All IDs are assigned for the simulated session; no real Meta/WhatsApp sends."
+  },
+  "ids": {
+    "company_id": "11111111-1111-4111-8111-111111111111",
+    "project_id": "22222222-2222-4222-8222-222222222222",
+    "lead_id": null,
+    "conversation_id": null,
+    "contact_id": null,
+    "property_type_id": null,
+    "unit_id": null
+  },
+  "captured_at": null,
+  "leads": {
+    "id": null,
+    "company_id": "11111111-1111-4111-8111-111111111111",
+    "project_id": "22222222-2222-4222-8222-222222222222",
+    "campaign_id": null,
+    "contact_id": null,
+    "full_name": null,
+    "phone": null,
+    "email": null,
+    "source": "Meta Lead Ads (simulated)",
+    "platform": "meta",
+    "preferred_channel": "simulation",
+    "consent_status": "unknown",
+    "intent_score": null,
+    "intent_tier": null,
+    "assigned_segment": null,
+    "pipeline_stage": "S00_CAPTURE",
+    "funnel_stage": "new",
+    "agent_status": "active",
+    "meta_form_data": {
+      "form_id": "EXAMPLE_FORM_ID",
+      "leadgen_id": null,
+      "campaign_name": "META-2026-11"
+    },
+    "lead_profile_data": {
+      "schema_version": 1,
+      "sales_profile": {
+        "version": "sales-lead-profile/2.0",
+        "current": {},
+        "history": [],
+        "facts": {}
+      },
+      "active_qualification": {
+        "asked": [],
+        "missing": [
+          "budget",
+          "purchase_timeline"
+        ]
+      }
+    },
+    "qualification_summary": null,
+    "created_at": null,
+    "deleted_at": null,
+    "is_demo": true,
+    "is_test": true
+  },
+  "lead_contacts": null,
+  "sales_conversations": {
+    "id": null,
+    "company_id": "11111111-1111-4111-8111-111111111111",
+    "project_id": "22222222-2222-4222-8222-222222222222",
+    "lead_id": null,
+    "channel": "simulation",
+    "provider": "hermes_web_demo",
+    "stage": "new",
+    "is_paused": false,
+    "continuity_json": {
+      "lead_id": null,
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "epoch": 1,
+      "last_inbound_message_id": null,
+      "waiting_for_lead": true
+    }
+  },
+  "sales_conversation_lead_contexts": [],
+  "sales_messages": [],
+  "sales_dialogue_states": {
+    "company_id": "11111111-1111-4111-8111-111111111111",
+    "project_id": "22222222-2222-4222-8222-222222222222",
+    "conversation_id": null,
+    "lead_id": null,
+    "revision": 0,
+    "schema_version": "sales-dialogue/1.0",
+    "state_json": {
+      "version": "sales-dialogue/1.0",
+      "selected_property_type_id": null,
+      "selected_unit_id": null,
+      "tasks": [],
+      "constraints": [],
+      "property_constraints": [],
+      "offers": [],
+      "preferences": [],
+      "memory": {
+        "version": "sales-turn-memory/1.0",
+        "as_of_message_id": null,
+        "recent_turns": [],
+        "answered_topics": []
+      },
+      "booking_search": {},
+      "booking_proposal": null,
+      "cadence_status": "active"
+    }
+  },
+  "lead_score_snapshots": [],
+  "meetings": [],
+  "sales_follow_up_jobs": [],
+  "example_next_steps": []
+}

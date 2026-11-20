@@ -1,0 +1,189 @@
+{
+  "schema_version": "hermes-demo/project/3.0",
+  "example_only": true,
+  "note": "Synthetic normalized demo domain. BP Project v2 is a proposal, not a production API contract.",
+  "company_id": "11111111-1111-4111-8111-111111111111",
+  "project": {
+    "id": "22222222-2222-4222-8222-222222222222",
+    "company_id": "11111111-1111-4111-8111-111111111111",
+    "code": "CR-LIMA-001",
+    "name": "Residencial Jardines del Sol",
+    "project_type": "mixed_residential",
+    "development_status": "completed",
+    "short_description": "Casas y departamentos terminados con espacios verdes compartidos.",
+    "long_description": "A fictional completed residential development featuring houses and apartments, for simulated onsite sales visits.",
+    "address": "Avenida Ejemplo 123, Urbanización Referencial (fictional address)",
+    "city": "Lima",
+    "region": "Lima",
+    "country": "PE",
+    "postal_code": null,
+    "location": {
+      "latitude": -12.096,
+      "longitude": -76.991,
+      "timezone": "America/Lima",
+      "map_asset_id": null
+    },
+    "is_active": true,
+    "is_demo": true,
+    "onboarding_status": "completed",
+    "sales_activation_status": "ready",
+    "default_currency": "USD",
+    "cover_source_id": "bbbbbbb1-bbbb-4bbb-8bbb-bbbbbbbbbbb1",
+    "created_at": "2026-09-03T14:00:00Z",
+    "developer": null
+  },
+  "profile": {
+    "draft_revision": 9,
+    "published_revision": 8,
+    "final_approved": true,
+    "approved_for_sales_at": "2026-11-18T16:00:00Z",
+    "fields": {
+      "project_name": "Residencial Jardines del Sol",
+      "project_type": "Mixed-use",
+      "project_status": "Completed",
+      "short_description": "Completed houses and apartments with shared green spaces (synthetic project).",
+      "project_cover": "bbbbbbb1-bbbb-4bbb-8bbb-bbbbbbbbbbb1",
+      "exact_address": "Avenida Ejemplo 123, Urbanización Referencial (fictional address)",
+      "city": "Lima",
+      "country": "Peru",
+      "timezone": "America/Lima",
+      "location_references": [
+        "A 2 km de un parque público"
+      ],
+      "phases_and_towers": "Single phase — no towers",
+      "property_type_catalog": [
+        "CASA-3D",
+        "DEPTO-2D",
+        "DEPTO-3D",
+        "CASA-4D"
+      ],
+      "typologies": [
+        "Three-bedroom house",
+        "Two-bedroom apartment",
+        "Three-bedroom apartment",
+        "Four-bedroom house"
+      ],
+      "areas": "92–215 m² of built area across the demo models",
+      "bedrooms_and_bathrooms": "2–4 bedrooms; 2–3 bathrooms",
+      "construction_details": "Reinforced concrete and finishes described in the synthetic approved fact sheet.",
+      "amenities": [
+        "Shared swimming pool",
+        "Gym",
+        "Landscaped green areas"
+      ],
+      "parking_and_storage": "Parking varies by unit; designated visitor spaces are mentioned in source materials.",
+      "currency": "USD",
+      "starting_price": 245000,
+      "payment_methods": [
+        "cash",
+        "bank_financing"
+      ],
+      "promotions": null,
+      "delivery_dates": "Immediate handover for demo units listed as available now; future dates are explicitly specified per newly added unit.",
+      "available_inventory": 4,
+      "sales_authorization": true,
+      "target_audience": "Buyers interested in completed residential houses or apartments.",
+      "value_proposition": "Move-in-ready houses and apartments with shared greenery and unit-level inventory information.",
+      "key_differentiators": [
+        "Shared green spaces",
+        "Unit-level inventory status",
+        "Onsite human advisor consultations"
+      ],
+      "qualification_rules": "Ask progressively about budget, property type, bedrooms, purchase timeline and visit readiness. Do not reveal personal financing figures.",
+      "sales_contacts": [
+        "87eb4580-5fc3-5a0a-bd87-d82ab12e0ca7",
+        "851dbc04-85b4-5439-82f9-39f285aae86f",
+        "b5121ace-089b-5ecb-ba2c-b05a8ab66764"
+      ],
+      "appointment_routing": "round_robin (synthetic advisors, no external calendar)",
+      "campaigns_defined": [
+        "META-2026-11"
+      ],
+      "meta_connection_verified": true,
+      "compliance_notes": "Synthetic demo only. No real financial terms, availability warranty, property offer or appointment guarantee."
+    },
+    "field_states_sample": {
+      "project_status": {
+        "status": "confirmed",
+        "applicable": true
+      },
+      "amenities": {
+        "status": "confirmed",
+        "applicable": true
+      },
+      "promotions": {
+        "status": "not_applicable",
+        "applicable": false
+      },
+      "sales_authorization": {
+        "status": "confirmed",
+        "applicable": true
+      }
+    },
+    "field_sources_sample": {
+      "amenities": {
+        "source_id": "bbbbbbb2-bbbb-4bbb-8bbb-bbbbbbbbbbb2",
+        "reviewed_by_user_id": "44444444-4444-4444-8444-444444444444"
+      }
+    }
+  },
+  "phases": [
+    {
+      "id": "55555555-5555-4555-8555-555555555555",
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "code": "PH1",
+      "name": "Etapa 1",
+      "status": "completed",
+      "delivery_date": "2026-08-01",
+      "sort_order": 1
+    }
+  ],
+  "commercial_offers": [
+    {
+      "id": "99999999-9999-4999-8999-999999999991",
+      "scope": "project",
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "property_type_id": null,
+      "unit_id": null,
+      "kind": "payment_method",
+      "description": "Transferencia o financiamiento bancario sujetos a validación.",
+      "valid_from": "2026-11-01T00:00:00Z",
+      "valid_until": null,
+      "approval_status": "approved",
+      "customer_disclaimer": "La aprobación financiera corresponde a la entidad financiera."
+    }
+  ],
+  "campaigns": [
+    {
+      "id": "ccccccc1-cccc-4ccc-8ccc-ccccccccccc1",
+      "name": "META-2026-11",
+      "platform": "meta",
+      "objective": "lead_generation",
+      "status": "active",
+      "external_campaign_id": "EXAMPLE_CAMPAIGN_ID",
+      "lead_form_id": "EXAMPLE_FORM_ID"
+    }
+  ],
+  "publishing": {
+    "draft_revision": 9,
+    "published_revision": 8,
+    "publish_requires": [
+      "administrator_approval",
+      "consistent_prices",
+      "verified_inventory",
+      "approved_assets"
+    ],
+    "note": "All approval flags in this bundle are for synthetic demo assets and are not evidence of approval by a real estate company.",
+    "published_asset_policy": "Only simulation-channel approved assets linked to ready public sources; original attached internal sources are excluded from demos."
+  },
+  "demo_derivation": {
+    "source_file": "BlackPenguin_Project_v2_ejemplo.json",
+    "source_schema_status": "proposed, not deployed",
+    "synthetic_extension": true,
+    "requires_live_reverification": true,
+    "not_for_real_sales": true,
+    "demo_locale": "en",
+    "demo_published_assets_only": true,
+    "demo_scheduling_data": "team.json + availability.json + scheduling_policy.json"
+  }
+}

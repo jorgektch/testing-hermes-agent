@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-label="Synthetic architectural concept illustration, not a property photo">
+    <defs><linearGradient id="sky" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#453d4e"/><stop offset="1" stop-color="#111f29"/></linearGradient>
+    <pattern id="grid" width="58" height="58" patternUnits="userSpaceOnUse"><path d="M58 0H0V58" fill="none" stroke="white" stroke-opacity=".07"/></pattern></defs>
+    <rect width="1200" height="760" fill="url(#sky)"/><rect width="1200" height="760" fill="url(#grid)"/>
+    <circle cx="984" cy="112" r="174" fill="#ae8da4" opacity=".10"/>
+    <g transform="translate(30 2) scale(.95)">
+          <rect x="180" y="106" width="590" height="427" rx="4" fill="#162a33" stroke="#ddd1c3" stroke-opacity=".35" stroke-width="4"/>
+          <rect x="230" y="70" width="500" height="40" fill="#1e3039"/>
+          <rect x="217" y="134" width="22" height="360" fill="#ae8da4" opacity=".36"/>
+          <rect x="709" y="134" width="22" height="360" fill="#ae8da4" opacity=".36"/>
+          <rect x="290" y="160" width="91" height="76" rx="2" fill="#ddd1c3" opacity="0.8"/><rect x="423" y="160" width="91" height="76" rx="2" fill="#ddd1c3" opacity="0.45"/><rect x="556" y="160" width="91" height="76" rx="2" fill="#ddd1c3" opacity="0.8"/><rect x="290" y="268" width="91" height="76" rx="2" fill="#ddd1c3" opacity="0.45"/><rect x="423" y="268" width="91" height="76" rx="2" fill="#ddd1c3" opacity="0.8"/><rect x="556" y="268" width="91" height="76" rx="2" fill="#ddd1c3" opacity="0.45"/><rect x="290" y="376" width="91" height="76" rx="2" fill="#ddd1c3" opacity="0.8"/><rect x="423" y="376" width="91" height="76" rx="2" fill="#ddd1c3" opacity="0.45"/><rect x="556" y="376" width="91" height="76" rx="2" fill="#ddd1c3" opacity="0.8"/>
+          <rect x="418" y="427" width="117" height="107" fill="#31544f" stroke="#ddd1c3" stroke-opacity=".6"/>
+          <path d="M180 290h590M180 398h590" stroke="#ae8da4" stroke-opacity=".6" stroke-width="5"/>
+        </g>
+    <rect x="0" y="620" width="1200" height="140" fill="#101a22" fill-opacity=".95"/>
+    <text x="67" y="674" fill="#ddd1c3" font-family="Arial,sans-serif" font-weight="bold" font-size="29" letter-spacing="2">THREE-BEDROOM FAMILY APARTMENT</text>
+    <text x="68" y="710" fill="#ae8da4" font-family="Arial,sans-serif" font-size="17" letter-spacing="3">A-204   /   SYNTHETIC CONCEPT 1   /   NOT A REAL PHOTO</text>
+    <text x="1034" y="78" text-anchor="middle" fill="#d7eee5" opacity=".7" font-family="Arial,sans-serif" font-size="16">JARDINES DEL SOL</text></svg>

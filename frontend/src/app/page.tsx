@@ -14,9 +14,15 @@ type Unit = {
   bedrooms: number; bathrooms: number; area_sqm: number; price_usd: number;
   available_from_date: string; status: string; highlights: string[];
   media: { gallery_urls: string[]; floorplan_brochure_pdf: string | null };
+  property_type_code?: string; property_type_description?: string; floor_number?: number | null;
+  lot_area_m2?: number | null; currency?: string; publication_status?: string;
+  confirmed_features?: Record<string, string | number | boolean>; demo_inventory_last_updated_at?: string;
+
 };
 type Catalog = {
   project_info: { name: string; developer: string; value_proposition: string;
+    project_type?: string; development_status?: string; published_revision?: number;
+    phase_names?: string[]; inventory_summary?: { total_units: number; available_units: number; reserved_units: number };
     amenities: string[]; general_brochure_pdf: string;
     location: { street_address: string; district: string; city: string; country: string }; };
   properties: Unit[];
@@ -27,10 +33,14 @@ type Lead = {
   budget_usd: number | null; purchase_timeframe: string | null; property_type: string | null;
   min_bedrooms: number | null; interest_unit_id: string | null;
 };
-type Booking = { booking_id: string; advisor_name: string; unit_id: string; date: string;
+type Booking = { booking_id: string; advisor_name: string; unit_id: string | null; status?: string; date: string;
   start_time: string; end_time: string; simulation_only: boolean };
+type BpFact = { field: string; value: unknown; status: string; source: string; evidence: string; captured_at: string; source_ref?: { message_id?: string } };
 type Profile = {
+  bp_episode?: { leads: { lead_profile_data: { sales_profile: { current: Record<string, BpFact>; history: BpFact[] } } };
+    meetings?: Record<string, unknown>[]; sales_dialogue_states?: { state_json: Record<string,unknown> } };
   lead: Lead; stage: string; shortlisted_unit_ids: string[]; booked_visits: Booking[];
+  booking_proposal?: { proposal_id: string; status: string; expires_at: string; options: { advisor_id: string; advisor_name: string; date: string; start_time: string; visit_end_time: string; buffer_end_time: string }[] } | null;
   events: { id: string; event: string; label: string; timestamp: string }[];
   turn_count: number;
 };
@@ -38,17 +48,17 @@ type Line = { role: 'user' | 'assistant'; content: string; id: string };
 type Session = { sessionId: string; token: string; state: Profile;
   history: Record<string, unknown>[]; messages: Line[] };
 
-const STORE_KEY = 'hermes-sales-lab-session-v1';
+const STORE_KEY = 'hermes-sales-lab-session-bp-v3';
 const ACCESS_KEY = 'hermes-sales-lab-access';
 const MAX_TURNS = 14;
 const usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 const promptExamples = [
-  'My budget is $175,000, and I want to buy within two months.',
+  'My budget is $260,000, and I want to buy within two months.',
   'I need at least two bedrooms. What can you recommend?',
-  'Could you show me the gallery and floor plan for EV-A101?',
+  'Could you show me the gallery and floor plan for A-201?',
 ];
 const greeting: Line = { role: 'assistant', id: 'greeting', content:
-  "Hi there! Welcome to Evergreen Park Residences. 👋 I'm Ava, your AI sales advisor. I'd love to help you find the right home. What budget are you considering, and when are you hoping to buy?" };
+  "Hi there! Welcome to Residencial Jardines del Sol. 👋 I'm Ava, your AI sales advisor. I'd love to help you find the right home. What budget are you considering, and when are you hoping to buy?" };
 const initial: Profile = {
   lead: { first_name: null, last_name: null, email: null, phone: null, budget_usd: null,
     purchase_timeframe: null, property_type: null, min_bedrooms: null, interest_unit_id: null },
@@ -94,9 +104,11 @@ export default function Page() {
   const [error, setError] = useState('');
   const [profileFlash, setProfileFlash] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
   const state = session?.state || initial;
   const filled = Object.values(state.lead).filter((x) => x !== null && x !== '').length;
-  const book = state.booked_visits[0];
+  const book = [...state.booked_visits].reverse().find((v) => v.status === 'confirmed');
+  const previousVisits = state.booked_visits.filter((v) => v.status !== 'confirmed');
   const project = catalog?.project_info;
   const properties = catalog?.properties.filter((u) => filter === 'All' || u.property_type === filter) || [];
 
@@ -114,6 +126,24 @@ export default function Page() {
       .then(setCatalog).catch((e: Error) => setCatalogError(e.message));
   }, []);
   useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }); }, [messages, busy]);
+  useEffect(() => {
+    if (!selected) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const oldOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    modalRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); setSelected(null); return; }
+      if (event.key !== 'Tab') return;
+      const nodes = Array.from(modalRef.current?.querySelectorAll<HTMLElement>('button,a[href],input,textarea,[tabindex]:not([tabindex="-1"])') ?? []).filter(el => !el.hasAttribute('disabled'));
+      if (!nodes.length) return;
+      const first=nodes[0], last=nodes[nodes.length-1];
+      if (event.shiftKey && document.activeElement === first) {event.preventDefault(); last.focus();}
+      else if (!event.shiftKey && document.activeElement === last) {event.preventDefault(); first.focus();}
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => { document.removeEventListener('keydown',onKeyDown); document.body.style.overflow=oldOverflow; previousFocus?.focus(); };
+  }, [selected]);
 
   const save = useCallback((v: Session) => {
     window.sessionStorage.setItem(STORE_KEY, JSON.stringify(v)); setSession(v);
@@ -136,13 +166,13 @@ export default function Page() {
           history: [], messages: [greeting] };
       }
       const res = await fetch('/api/chat', { method: 'POST', headers,
-        body: JSON.stringify({ token: current.token, message, history: current.history }) });
+        body: JSON.stringify({ token: current.token, message }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Unable to contact the AI agent');
       const updated: Line[] = [...next, { role: 'assistant', content: data.reply, id: `ai-${Date.now()}` }];
       setMessages(updated);
       save({ sessionId: current.sessionId, token: data.token, state: data.state,
-        history: data.history, messages: updated });
+        history: [], messages: updated });
       setProfileFlash(true); window.setTimeout(() => setProfileFlash(false), 1200);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unexpected error');
@@ -151,8 +181,23 @@ export default function Page() {
   }, [accessCode, busy, draft, messages, save, session, state.turn_count]);
 
   return <div className="app-shell">
+    <aside className="shell-sidebar" aria-label="Demo navigation">
+      <div className="sidebar-wordmark"><span>black</span><strong>penguin</strong><small>.ai</small></div>
+      <div className="sidebar-divider"/>
+      <div className="sidebar-section">RESEARCH WORKSPACE</div>
+      <nav className="sidebar-nav">
+        <a href="#overview"><span className="material-symbols-outlined">space_dashboard</span>Overview</a>
+        <a href="#inventory"><span className="material-symbols-outlined">apartment</span>Property inventory</a>
+        <a href="#conversation" className="sidebar-active"><span className="material-symbols-outlined">forum</span>Hermes agent</a>
+        <a href="#lead-state"><span className="material-symbols-outlined">person_search</span>Lead intelligence</a>
+      </nav>
+      <div className="sidebar-section sidebar-section-second">EXPERIMENT</div>
+      <div className="sidebar-support"><span className="material-symbols-outlined">science</span><span>Hermes Agent Lab<small>Independent research demo</small></span></div>
+      <div className="sidebar-bottom"><div className="sidebar-profile-icon">H</div><span>Sandbox session<small>Synthetic data · No CRM</small></span><span className="material-symbols-outlined">verified_user</span></div>
+    </aside>
+    <div className="shell-main">
     <header className="global-header">
-      <div className="brand"><div className="brand-logo">☤</div><div><strong>HERMES <span>/ AGENT LAB</span></strong><small>REAL ESTATE SALES EXPERIMENT</small></div></div>
+      <div className="brand"><div className="brand-logo"><span className="material-symbols-outlined">neurology</span></div><div><strong>Hermes <span>Agent Lab</span></strong><small>REAL ESTATE SALES EXPERIMENT</small></div></div>
       <div className="header-right"><div className="model-badge"><span className="green-dot"/> OpenRouter <span className="badge-separator"/> gpt-4o-mini</div>
         <button className="access-button" onClick={() => setShowAccess(!showAccess)}><LockKeyhole size={13}/> {accessCode ? 'Access set' : 'Demo access'} <ChevronDown size={14}/></button>
         <div className="avatar-small">AI</div></div>
@@ -162,23 +207,24 @@ export default function Page() {
       </div>}
     </header>
 
-    <section className="hero-heading"><div><div className="eyebrow">INTERACTIVE PLAYGROUND <span>/</span> SIMULATION 001</div>
-      <h1>One project. One lead. <em>One conversation.</em></h1>
-      <p>Watch a Hermes-powered advisor qualify a buyer, recommend homes and guide an onsite visit.</p></div>
+    <section className="hero-heading" id="overview"><div><div className="eyebrow">INTERACTIVE PLAYGROUND <span>/</span> SIMULATION 001</div>
+      <h1>Real estate sales. <em>Agent intelligence.</em></h1>
+      <p>Explore a BlackPenguin-inspired property catalog while Nous Research Hermes qualifies a synthetic lead and proposes a showroom visit.</p></div>
       <div className="experiment-status"><span className="exp-icon"><Activity size={19}/></span><div><strong>Experiment live</strong><small>Lead journey · 45-min visit</small></div></div>
     </section>
 
     <main className="dashboard">
-      <section className="inventory-column">
-        <div className="column-heading"><div><span className="eyebrow">01 / KNOWLEDGE BASE</span><h2>Property inventory <span className="counter">04</span></h2></div><span className="column-pill"><Layers3 size={13}/> Synthetic data</span></div>
-        <div className="project-banner"><div className="project-super"><div className="building-icon"><House size={20}/></div><span>RESIDENTIAL COMMUNITY</span></div><h3>{project?.name || 'Evergreen Park Residences'}</h3>
-          <p className="map-caption"><MapPin size={14}/> Santiago de Surco, Lima, Peru</p>
-          <div className="hero-metrics"><div><strong>04</strong><span>Built homes</span></div><div><strong>08</strong><span>Amenities</span></div><div><strong>03</strong><span>Sales advisors</span></div></div>
+      <section className="inventory-column" id="inventory">
+        <div className="column-heading"><div><span className="eyebrow">01 / KNOWLEDGE BASE</span><h2>Property inventory <span className="counter">{catalog?.properties.length ?? 0}</span></h2></div><span className="column-pill"><Layers3 size={13}/> Synthetic data</span></div>
+        <div className="project-banner"><div className="project-super"><div className="building-icon"><House size={20}/></div><span>RESIDENTIAL COMMUNITY</span></div><h3>{project?.name || 'Residencial Jardines del Sol'}</h3>
+          <p className="map-caption"><MapPin size={14}/> {project ? `${project.location.city}, ${project.location.country}` : 'Lima, Peru'}</p>
+          <div className="hero-metrics"><div><strong>{catalog?.properties.length ?? 0}</strong><span>Available homes</span></div><div><strong>{project?.amenities.length ?? 0}</strong><span>Amenities</span></div><div><strong>{catalog?.sales_advisors.length ?? 0}</strong><span>Sales advisors</span></div></div>
           <button className="project-details" onClick={() => setShowProject(!showProject)}>Explore project details <ChevronRight size={16}/></button>
         </div>
         {showProject && project && <div className="project-expanded"><p>{project.value_proposition}</p><div className="eyebrow">PROJECT AMENITIES</div>
           <div className="amenities-list">{project.amenities.map((a) => <span key={a}><Check size={12}/>{a}</span>)}</div>
           <small>{project.location.street_address} · {project.developer}</small>
+          <div className="project-inspection"><div><strong>Development</strong><span>{project.development_status || 'Not specified'}</span></div><div><strong>Project structure</strong><span>{project.phase_names?.join(', ') || 'Not specified'}</span></div><div><strong>Published revision</strong><span>v{project.published_revision ?? '—'} · synthetic</span></div><div><strong>Inventory</strong><span>{project.inventory_summary?.available_units ?? '—'} available / {project.inventory_summary?.reserved_units ?? '—'} reserved</span></div></div>
           <a href={project.general_brochure_pdf} target="_blank" rel="noopener noreferrer"><FileText size={14}/> View demo project brochure</a>
         </div>}
         <div className="inventory-toolbar"><div><SlidersHorizontal size={14}/> AVAILABLE UNITS <span>{properties.length} properties</span></div>
@@ -202,7 +248,7 @@ export default function Page() {
         <p className="inventory-warning"><Info size={12}/> Fictional project, inventory, prices, advisors and media.</p>
       </section>
 
-      <section className="chat-column"><div className="column-heading"><div><span className="eyebrow">02 / CONVERSATION</span><h2>Live sales chat <span className="heading-live"/></h2></div><span className="column-pill"><MessageCircle size={13}/> English</span></div>
+      <section className="chat-column" id="conversation"><div className="column-heading"><div><span className="eyebrow">02 / CONVERSATION</span><h2>Live sales chat <span className="heading-live"/></h2></div><span className="column-pill"><MessageCircle size={13}/> English</span></div>
         <div className="agent-line"><div className="agent-icon"><Bot size={22}/></div><div><strong>Ava <span>AI Sales Advisor</span></strong><small>Powered by Nous Research Hermes Agent</small></div><span className="agent-online"><span className="green-dot"/> Available</span></div>
         <div className="chat-body" ref={scrollRef}><div className="chat-begin"><span>YOUR INTERACTIVE LEAD SESSION</span><small>Each message invokes the Hermes conversation runtime.</small></div>
           {messages.map((m) => <div key={m.id} className={`chat-message ${m.role === 'user' ? 'from-lead' : 'from-agent'}`}>
@@ -218,7 +264,7 @@ export default function Page() {
         </div>
       </section>
 
-      <aside className={`state-column ${profileFlash ? 'state-flash' : ''}`}><div className="column-heading"><div><span className="eyebrow">03 / LIVE STATE</span><h2>Lead intelligence</h2></div><span className="live-pill"><span className="green-dot"/> Live</span></div>
+      <aside id="lead-state" className={`state-column ${profileFlash ? 'state-flash' : ''}`}><div className="column-heading"><div><span className="eyebrow">03 / LIVE STATE</span><h2>Lead intelligence</h2></div><span className="live-pill"><span className="green-dot"/> Live</span></div>
         <div className="tracking-summary"><div className="tracking-value">{filled}<span>/9</span></div><div><strong>Profile completeness</strong><small>Updated by agent tool calls</small><div className="progress-bar"><span style={{width: `${(filled / 9) * 100}%`}}/></div></div></div>
         <div className="state-body"><div className="state-section-title">CONVERSATION STAGE <Activity size={14}/></div>
           <div className="stage-summary"><span><Activity size={16}/></span><div><small>CURRENT STAGE</small><strong>{state.stage}</strong></div></div>
@@ -227,28 +273,51 @@ export default function Page() {
             const value = state.lead[f.key]; const hasValue = value !== null && value !== '';
             return <div key={f.key} className={`profile-field ${hasValue ? 'captured' : ''}`}><div className="field-check">{hasValue ? <Check size={12}/> : <i/>}</div><div><small>{f.label}</small><strong>{hasValue ? f.format ? f.format(value) : String(value) : f.fallback}</strong></div></div>;
           })}</div>
+          <div className="state-section-title">BLACKPENGUIN · EVIDENCE <span>{Object.keys(state.bp_episode?.leads.lead_profile_data.sales_profile.current ?? {}).length}</span></div>
+          {Object.entries(state.bp_episode?.leads.lead_profile_data.sales_profile.current ?? {}).length ? <div className="events">{Object.entries(state.bp_episode?.leads.lead_profile_data.sales_profile.current ?? {}).slice(-6).map(([key, fact]) => <div key={key}><i/><span><strong>{key}: {String(fact.value)}</strong><small>{fact.status} · {fact.source}</small><small title={fact.evidence}>Evidence: {fact.evidence.slice(0, 120)}</small><small className="evidence-ref">Message {fact.source_ref?.message_id?.slice(0, 8) || 'not referenced'} · {eventTime(fact.captured_at)}</small></span></div>)}</div> : <p className="muted-message">No declared commercial facts yet. Captured statements include provenance and evidence.</p>}
           <div className="state-section-title">MATCHED PROPERTIES <span>{state.shortlisted_unit_ids.length}</span></div>
           {state.shortlisted_unit_ids.length ? <div className="shortlist">{state.shortlisted_unit_ids.map((id) => { const u = catalog?.properties.find((x) => x.unit_id === id); return <button key={id} onClick={() => { if (u) {setSelected(u); setPhoto(0);} }}><House size={16}/><span><strong>{id}</strong><small>{u?.commercial_name}</small></span><ChevronRight size={14}/></button>; })}</div> : <p className="muted-message">Qualify the lead in chat to see matching homes here.</p>}
           <div className="state-section-title">ONSITE VISIT <CalendarDays size={14}/></div>
-          {book ? <div className="booked-visit"><span><CheckCircle2 size={16}/> Simulated reservation</span><strong>{book.date} · {book.start_time}–{book.end_time}</strong><small>{book.advisor_name} · {book.unit_id}</small><small>{book.booking_id}</small></div> : <div className="no-booking"><CalendarDays size={23}/><strong>Not yet scheduled</strong><small>45-min appointment · 15-min buffer</small></div>}
+          {book ? <div className="booked-visit"><span><CheckCircle2 size={16}/> Simulated reservation</span><strong>{book.date} · {book.start_time}–{book.end_time}</strong><small>{book.advisor_name} · {book.unit_id || 'Project-wide visit'}</small><small>{book.booking_id}</small></div> : <div className="no-booking"><CalendarDays size={23}/><strong>No active appointment</strong><small>45-minute visit · 15-minute buffer</small></div>}
+          {previousVisits.length ? <div className="visit-history"><small>VISIT HISTORY</small>{previousVisits.map(v => <div key={v.booking_id}><span>{v.date} · {v.start_time}</span><strong>{v.status || 'previous'}</strong></div>)}</div> : null}
+          {state.booking_proposal?.options?.length && !book ? <div className="offer-panel"><div className="state-section-title offer-heading">OFFERED SLOTS <Clock3 size={14}/></div><small>Not held · Revalidated on confirmation</small>{state.booking_proposal.options.map((opt) => <div className="offer-row" key={`${opt.advisor_id}-${opt.date}-${opt.start_time}`}><CalendarDays size={14}/><span><strong>{opt.date} · {opt.start_time}–{opt.visit_end_time}</strong><small>{opt.advisor_name} · Buffer until {opt.buffer_end_time}</small></span></div>)}<small className="expires-note">Offer expires {eventTime(state.booking_proposal.expires_at)} · Demo only</small></div> : null}
           <div className="state-section-title">TOOL ACTIVITY <Terminal size={14}/></div>
           {state.events.length ? <div className="events">{[...state.events].reverse().slice(0, 7).map((e) => <div key={e.id}><i/><span><strong>{e.label}</strong><small>{e.event.replace('_',' ')} · {eventTime(e.timestamp)}</small></span></div>)}</div> : <p className="muted-message">Tool activity will appear here after new lead facts or property matches.</p>}
+          <details className="raw-inspector"><summary><span className="material-symbols-outlined">data_object</span> Inspect structured state</summary><pre>{JSON.stringify({
+            lead: state.lead,
+            sales_profile_current: state.bp_episode?.leads.lead_profile_data.sales_profile.current ?? {},
+            dialogue: state.bp_episode?.sales_dialogue_states?.state_json ?? {},
+            booking_proposal: state.booking_proposal ?? null,
+            meetings: state.bp_episode?.meetings ?? [],
+          },null,2)}</pre></details>
         </div>
-        <div className="state-foot"><ShieldCheck size={15}/> Signed demo state · no real appointments</div>
+        <div className="state-foot"><ShieldCheck size={15}/> Signed state, synthetic data · no real appointments</div>
       </aside>
     </main>
     <footer className="page-footer"><span>HERMES AGENT LAB · Independent experiment using Nous Research Hermes</span><span>Next.js / FastAPI / OpenRouter / Vercel</span></footer>
 
-    {selected && <div className="modal-overlay" onMouseDown={(e) => {if (e.target === e.currentTarget) setSelected(null);}}><div className="property-modal" role="dialog" aria-modal="true" aria-label={`Details for ${selected.commercial_name}`}>
+    {selected && <div className="modal-overlay" onMouseDown={(e) => {if (e.target === e.currentTarget) setSelected(null);}}><div className="property-modal" ref={modalRef} role="dialog" aria-modal="true" aria-label={`Details for ${selected.commercial_name}`}>
       <div className="modal-heading"><span className="eyebrow">PROPERTY RECORD / {selected.unit_id}</span><button aria-label="Close dialog" onClick={() => setSelected(null)}><X size={19}/></button></div>
       <div className="modal-art">{selected.media.gallery_urls.length ? <img src={selected.media.gallery_urls[photo]} alt="Synthetic property concept illustration"/> : <div className="modal-no-gallery"><Images size={35}/> No gallery available</div>}
         {selected.media.gallery_urls.length > 1 && <div className="photo-controls"><button onClick={() => setPhoto((photo - 1 + selected.media.gallery_urls.length) % selected.media.gallery_urls.length)}><ArrowLeft size={15}/></button><span>{photo + 1}/{selected.media.gallery_urls.length}</span><button onClick={() => setPhoto((photo + 1) % selected.media.gallery_urls.length)}><ArrowRight size={15}/></button></div>}</div>
       <div className="modal-main"><div className="modal-kicker"><span>{selected.property_type} · {selected.status}</span><span>{selected.unit_id}</span></div><h2>{selected.commercial_name}</h2><p className="modal-price">{usd.format(selected.price_usd)}</p>
         <div className="modal-facts"><div><BedDouble size={17}/><strong>{selected.bedrooms}</strong><small>Bedrooms</small></div><div><Bath size={17}/><strong>{selected.bathrooms}</strong><small>Bathrooms</small></div><div><Square size={17}/><strong>{selected.area_sqm} m²</strong><small>Built area</small></div><div><Clock3 size={17}/><strong>{displayReady(selected.available_from_date)}</strong><small>Available</small></div></div>
+        <div className="modal-description">{selected.property_type_description || 'No additional type description provided.'}</div>
+        <div className="property-detail-grid">
+          <div><small>TYPE CODE</small><strong>{selected.property_type_code || '—'}</strong></div>
+          <div><small>FLOOR</small><strong>{selected.floor_number ?? 'Not specified'}</strong></div>
+          <div><small>LOT AREA</small><strong>{selected.lot_area_m2 == null ? 'Not applicable' : `${selected.lot_area_m2} m²`}</strong></div>
+          <div><small>CURRENCY</small><strong>{selected.currency ?? 'USD'}</strong></div>
+          <div><small>INVENTORY VERIFIED</small><strong>{selected.demo_inventory_last_updated_at?.slice(0,10) ?? 'Unknown'} · demo</strong></div>
+          <div><small>PUBLICATION</small><strong>Approved in synthetic catalog</strong></div>
+        </div>
+        <div className="modal-label">VERIFIED PROPERTY FEATURES</div>
+        <div className="feature-inspector">{Object.entries(selected.confirmed_features || {}).length ? Object.entries(selected.confirmed_features || {}).map(([key,value]) => <div key={key}><span>{key.replaceAll('_',' ')}</span><strong>{typeof value === 'boolean' ? (value ? 'Yes' : 'No') : String(value)}</strong></div>) : <small>No confirmed type-level features.</small>}</div>
         <div className="modal-label">HIGHLIGHTS</div><div className="modal-chips">{selected.highlights.map((x) => <span key={x}><CheckCircle2 size={13}/>{x}</span>)}</div>
-        <div className="modal-label">MEDIA</div><div className="modal-links"><div><Images size={16}/><span>Gallery</span><strong>{selected.media.gallery_urls.length ? `${selected.media.gallery_urls.length} images` : 'Not available'}</strong></div><div><FileText size={16}/><span>Floorplan PDF</span>{selected.media.floorplan_brochure_pdf ? <a href={selected.media.floorplan_brochure_pdf} target="_blank" rel="noopener noreferrer">Open PDF <ArrowUp size={13}/></a> : <strong>Not available</strong>}</div></div>
+        <div className="modal-label">MEDIA</div><div className="modal-links"><div><Images size={16}/><span>Gallery</span><strong>{selected.media.gallery_urls.length ? `${selected.media.gallery_urls.length} images` : 'Not available'}</strong></div><div><FileText size={16}/><span>Unit PDF</span>{selected.media.floorplan_brochure_pdf ? <a href={selected.media.floorplan_brochure_pdf} target="_blank" rel="noopener noreferrer">Open PDF <ArrowUp size={13}/></a> : <strong>Not available</strong>}</div></div>
         <button className="ask-about" onClick={() => {setDraft(`I would like to learn more about ${selected.unit_id}.`);setSelected(null);}}><MessageCircle size={17}/> Ask Ava about this home <ArrowRight size={16}/></button>
         <small className="modal-disclaimer">All project and home information is fictional. Illustrations and PDFs are synthetic demo assets.</small>
       </div></div></div>}
+    </div>
   </div>;
 }

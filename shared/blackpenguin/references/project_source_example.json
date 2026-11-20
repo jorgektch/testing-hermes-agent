@@ -1,0 +1,486 @@
+{
+  "schema_version": "blackpenguin-project-bundle/2.0-PROPOSED",
+  "example_only": true,
+  "note": "Ejemplo sintético ilustrativo; NO es un payload actualmente aceptado por la API ni un dump de una sola tabla.",
+  "company_id": "11111111-1111-4111-8111-111111111111",
+  "project": {
+    "id": "22222222-2222-4222-8222-222222222222",
+    "company_id": "11111111-1111-4111-8111-111111111111",
+    "code": "CR-LIMA-001",
+    "name": "Residencial Jardines del Sol",
+    "project_type": "mixed_residential",
+    "development_status": "completed",
+    "short_description": "Casas y departamentos terminados con espacios verdes compartidos.",
+    "long_description": "Proyecto residencial con dos modelos de casa y un modelo de departamento, disponible para visitas presenciales.",
+    "address": "Avenida Ejemplo 123, Urbanización Referencial",
+    "city": "Lima",
+    "region": "Lima",
+    "country": "PE",
+    "postal_code": null,
+    "location": {
+      "latitude": -12.096,
+      "longitude": -76.991,
+      "timezone": "America/Lima",
+      "map_asset_id": null
+    },
+    "is_active": true,
+    "is_demo": false,
+    "onboarding_status": "completed",
+    "sales_activation_status": "ready",
+    "default_currency": "USD",
+    "cover_source_id": "bbbbbbb1-bbbb-4bbb-8bbb-bbbbbbbbbbb1",
+    "created_at": "2026-09-03T14:00:00Z"
+  },
+  "profile": {
+    "draft_revision": 8,
+    "published_revision": 7,
+    "final_approved": true,
+    "approved_for_sales_at": "2026-11-18T16:00:00Z",
+    "fields": {
+      "project_name": "Residencial Jardines del Sol",
+      "project_type": "Mixed-use",
+      "project_status": "Completed",
+      "short_description": "Casas y departamentos terminados con espacios verdes compartidos.",
+      "project_cover": "bbbbbbb1-bbbb-4bbb-8bbb-bbbbbbbbbbb1",
+      "exact_address": "Avenida Ejemplo 123, Urbanización Referencial",
+      "city": "Lima",
+      "country": "Peru",
+      "timezone": "America/Lima",
+      "location_references": [
+        "A 2 km de un parque público"
+      ],
+      "phases_and_towers": "Single phase — no towers",
+      "property_type_catalog": [
+        "CASA-3D",
+        "DEPTO-2D"
+      ],
+      "typologies": [
+        "Casa de 3 dormitorios",
+        "Departamento de 2 dormitorios"
+      ],
+      "areas": "92-165 m² de área construida",
+      "bedrooms_and_bathrooms": "2-3 dormitorios; 2-2.5 baños",
+      "construction_details": "Concreto armado y acabados según ficha técnica aprobada.",
+      "amenities": [
+        "Piscina compartida",
+        "Gimnasio",
+        "Áreas verdes"
+      ],
+      "parking_and_storage": "Estacionamientos según unidad; visitas con espacios designados.",
+      "currency": "USD",
+      "starting_price": 245000,
+      "payment_methods": [
+        "cash",
+        "bank_financing"
+      ],
+      "promotions": null,
+      "delivery_dates": "Entrega inmediata de unidades disponibles",
+      "available_inventory": 2,
+      "sales_authorization": true,
+      "target_audience": "Compradores que buscan vivienda terminada con dos o tres dormitorios.",
+      "value_proposition": "Viviendas listas para visitar con alternativas de casa y departamento.",
+      "key_differentiators": [
+        "Espacios verdes comunes",
+        "Disponibilidad verificada por unidad"
+      ],
+      "qualification_rules": "Preguntar progresivamente por presupuesto, tipo de vivienda, plazo y fecha de visita.",
+      "sales_contacts": [
+        "33333333-3333-4333-8333-333333333333"
+      ],
+      "appointment_routing": "round_robin",
+      "campaigns_defined": [
+        "META-2026-11"
+      ],
+      "meta_connection_verified": true,
+      "compliance_notes": "Los costos, descuentos y financiamiento están sujetos a validación por el equipo comercial."
+    },
+    "field_states_sample": {
+      "project_status": {
+        "status": "confirmed",
+        "applicable": true
+      },
+      "amenities": {
+        "status": "confirmed",
+        "applicable": true
+      },
+      "promotions": {
+        "status": "not_applicable",
+        "applicable": false
+      },
+      "sales_authorization": {
+        "status": "confirmed",
+        "applicable": true
+      }
+    },
+    "field_sources_sample": {
+      "amenities": {
+        "source_id": "bbbbbbb2-bbbb-4bbb-8bbb-bbbbbbbbbbb2",
+        "reviewed_by_user_id": "44444444-4444-4444-8444-444444444444"
+      }
+    }
+  },
+  "phases": [
+    {
+      "id": "55555555-5555-4555-8555-555555555555",
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "code": "PH1",
+      "name": "Etapa 1",
+      "status": "completed",
+      "delivery_date": "2026-08-01",
+      "sort_order": 1
+    }
+  ],
+  "feature_definitions": [
+    {
+      "key": "shared_pool",
+      "label": "Piscina compartida",
+      "value_type": "boolean",
+      "category": "common_amenities",
+      "allowed_scopes": [
+        "project"
+      ]
+    },
+    {
+      "key": "shared_gym",
+      "label": "Gimnasio",
+      "value_type": "boolean",
+      "category": "common_amenities",
+      "allowed_scopes": [
+        "project"
+      ]
+    },
+    {
+      "key": "kitchen_layout",
+      "label": "Tipo de cocina",
+      "value_type": "enum",
+      "allowed_values": [
+        "open",
+        "closed",
+        "semi_open"
+      ],
+      "category": "interior",
+      "allowed_scopes": [
+        "property_type",
+        "unit"
+      ]
+    },
+    {
+      "key": "private_backyard",
+      "label": "Jardín privado",
+      "value_type": "boolean",
+      "category": "exterior",
+      "allowed_scopes": [
+        "property_type",
+        "unit"
+      ]
+    },
+    {
+      "key": "backyard_area_m2",
+      "label": "Área de jardín",
+      "value_type": "decimal",
+      "unit": "m2",
+      "category": "exterior",
+      "allowed_scopes": [
+        "property_type",
+        "unit"
+      ]
+    },
+    {
+      "key": "private_terrace",
+      "label": "Terraza privada",
+      "value_type": "boolean",
+      "category": "exterior",
+      "allowed_scopes": [
+        "property_type",
+        "unit"
+      ]
+    },
+    {
+      "key": "parking_spaces",
+      "label": "Estacionamientos por unidad",
+      "value_type": "integer",
+      "category": "parking",
+      "allowed_scopes": [
+        "property_type",
+        "unit"
+      ]
+    }
+  ],
+  "project_features": [
+    {
+      "feature_key": "shared_pool",
+      "value_bool": true,
+      "verification_status": "confirmed"
+    },
+    {
+      "feature_key": "shared_gym",
+      "value_bool": true,
+      "verification_status": "confirmed"
+    }
+  ],
+  "property_types": [
+    {
+      "id": "66666666-6666-4666-8666-666666666661",
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "phase_id": "55555555-5555-4555-8555-555555555555",
+      "code": "CASA-3D",
+      "name": "Casa Familiar 3D",
+      "category": "house",
+      "description": "Casa terminada de tres dormitorios con jardín posterior.",
+      "bedrooms": 3,
+      "bathrooms": 2.5,
+      "built_area_min_m2": 150,
+      "built_area_max_m2": 165,
+      "lot_area_min_m2": 180,
+      "lot_area_max_m2": 210,
+      "total_units": 2,
+      "available_units": 1,
+      "starting_price": "320000.00",
+      "maximum_price": "350000.00",
+      "currency": "USD",
+      "review_status": "confirmed",
+      "inventory_updated_at": "2026-11-18T15:00:00Z",
+      "features": [
+        {
+          "feature_key": "kitchen_layout",
+          "value_text": "open",
+          "verification_status": "confirmed"
+        },
+        {
+          "feature_key": "private_backyard",
+          "value_bool": true,
+          "verification_status": "confirmed"
+        },
+        {
+          "feature_key": "backyard_area_m2",
+          "value_number": "25.0",
+          "verification_status": "confirmed"
+        },
+        {
+          "feature_key": "parking_spaces",
+          "value_number": "2",
+          "verification_status": "confirmed"
+        }
+      ]
+    },
+    {
+      "id": "66666666-6666-4666-8666-666666666662",
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "phase_id": "55555555-5555-4555-8555-555555555555",
+      "code": "DEPTO-2D",
+      "name": "Departamento Vista Jardín",
+      "category": "apartment",
+      "description": "Departamento terminado con terraza privada.",
+      "bedrooms": 2,
+      "bathrooms": 2,
+      "built_area_min_m2": 92,
+      "built_area_max_m2": 92,
+      "lot_area_min_m2": null,
+      "lot_area_max_m2": null,
+      "total_units": 1,
+      "available_units": 1,
+      "starting_price": "245000.00",
+      "maximum_price": "245000.00",
+      "currency": "USD",
+      "review_status": "confirmed",
+      "inventory_updated_at": "2026-11-18T15:00:00Z",
+      "features": [
+        {
+          "feature_key": "kitchen_layout",
+          "value_text": "closed",
+          "verification_status": "confirmed"
+        },
+        {
+          "feature_key": "private_terrace",
+          "value_bool": true,
+          "verification_status": "confirmed"
+        },
+        {
+          "feature_key": "parking_spaces",
+          "value_number": "1",
+          "verification_status": "confirmed"
+        }
+      ]
+    }
+  ],
+  "units": [
+    {
+      "id": "77777777-7777-4777-8777-777777777771",
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "property_type_id": "66666666-6666-4666-8666-666666666661",
+      "phase_id": "55555555-5555-4555-8555-555555555555",
+      "unit_code": "H-101",
+      "built_area_m2": 150,
+      "lot_area_m2": 180,
+      "floor_number": 1,
+      "bedrooms": 3,
+      "bathrooms": 2.5,
+      "list_price": "320000.00",
+      "currency": "USD",
+      "status": "available",
+      "inventory_updated_at": "2026-11-18T15:00:00Z",
+      "inventory_confirmed_by_user_id": "44444444-4444-4444-8444-444444444444",
+      "features": []
+    },
+    {
+      "id": "77777777-7777-4777-8777-777777777772",
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "property_type_id": "66666666-6666-4666-8666-666666666661",
+      "phase_id": "55555555-5555-4555-8555-555555555555",
+      "unit_code": "H-102",
+      "built_area_m2": 165,
+      "lot_area_m2": 210,
+      "floor_number": 1,
+      "bedrooms": 3,
+      "bathrooms": 2.5,
+      "list_price": "350000.00",
+      "currency": "USD",
+      "status": "reserved",
+      "inventory_updated_at": "2026-11-18T15:00:00Z",
+      "inventory_confirmed_by_user_id": "44444444-4444-4444-8444-444444444444",
+      "features": [
+        {
+          "feature_key": "backyard_area_m2",
+          "value_number": "30.0",
+          "verification_status": "confirmed"
+        }
+      ]
+    },
+    {
+      "id": "77777777-7777-4777-8777-777777777773",
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "property_type_id": "66666666-6666-4666-8666-666666666662",
+      "phase_id": "55555555-5555-4555-8555-555555555555",
+      "unit_code": "A-201",
+      "built_area_m2": 92,
+      "lot_area_m2": null,
+      "floor_number": 2,
+      "bedrooms": 2,
+      "bathrooms": 2,
+      "list_price": "245000.00",
+      "currency": "USD",
+      "status": "available",
+      "inventory_updated_at": "2026-11-18T15:00:00Z",
+      "inventory_confirmed_by_user_id": "44444444-4444-4444-8444-444444444444",
+      "features": []
+    }
+  ],
+  "inventory_events": [
+    {
+      "id": "88888888-8888-4888-8888-888888888881",
+      "unit_id": "77777777-7777-4777-8777-777777777772",
+      "from_status": "available",
+      "to_status": "reserved",
+      "reason": "Reserva de unidad verificada por Sales",
+      "verified_at": "2026-11-18T15:00:00Z",
+      "source_id": "bbbbbbb2-bbbb-4bbb-8bbb-bbbbbbbbbbb2"
+    }
+  ],
+  "commercial_offers": [
+    {
+      "id": "99999999-9999-4999-8999-999999999991",
+      "scope": "project",
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "property_type_id": null,
+      "unit_id": null,
+      "kind": "payment_method",
+      "description": "Transferencia o financiamiento bancario sujetos a validación.",
+      "valid_from": "2026-11-01T00:00:00Z",
+      "valid_until": null,
+      "approval_status": "approved",
+      "customer_disclaimer": "La aprobación financiera corresponde a la entidad financiera."
+    }
+  ],
+  "sources": [
+    {
+      "id": "bbbbbbb1-bbbb-4bbb-8bbb-bbbbbbbbbbb1",
+      "kind": "uploaded_file",
+      "name": "Portada oficial",
+      "mime_type": "image/jpeg",
+      "storage_path": "projects/example/cover.jpg",
+      "status": "ready",
+      "sharing_intent": "internal"
+    },
+    {
+      "id": "bbbbbbb2-bbbb-4bbb-8bbb-bbbbbbbbbbb2",
+      "kind": "uploaded_file",
+      "name": "Ficha técnica aprobada",
+      "mime_type": "application/pdf",
+      "storage_path": "projects/example/specification.pdf",
+      "status": "ready",
+      "sharing_intent": "internal"
+    },
+    {
+      "id": "bbbbbbb3-bbbb-4bbb-8bbb-bbbbbbbbbbb3",
+      "kind": "uploaded_file",
+      "name": "Brochure comercial",
+      "mime_type": "application/pdf",
+      "storage_path": "projects/example/brochure.pdf",
+      "status": "ready",
+      "sharing_intent": "internal"
+    }
+  ],
+  "approved_sales_assets": [
+    {
+      "id": "aaaaaaa1-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
+      "source_id": "bbbbbbb3-bbbb-4bbb-8bbb-bbbbbbbbbbb3",
+      "asset_type": "brochure",
+      "display_name": "Brochure del proyecto",
+      "approval_status": "approved",
+      "allowed_channels": [
+        "whatsapp",
+        "sms"
+      ],
+      "valid_from": "2026-11-01T00:00:00Z",
+      "valid_until": null,
+      "coverage": [
+        {
+          "property_type_id": "66666666-6666-4666-8666-666666666661",
+          "unit_id": null,
+          "content_tags": [
+            "brochure"
+          ],
+          "pages": [
+            2,
+            3
+          ],
+          "summary": "Modelo casa"
+        },
+        {
+          "property_type_id": "66666666-6666-4666-8666-666666666662",
+          "unit_id": null,
+          "content_tags": [
+            "brochure"
+          ],
+          "pages": [
+            4,
+            5
+          ],
+          "summary": "Modelo departamento"
+        }
+      ]
+    }
+  ],
+  "campaigns": [
+    {
+      "id": "ccccccc1-cccc-4ccc-8ccc-ccccccccccc1",
+      "name": "META-2026-11",
+      "platform": "meta",
+      "objective": "lead_generation",
+      "status": "active",
+      "external_campaign_id": "EXAMPLE_CAMPAIGN_ID",
+      "lead_form_id": "EXAMPLE_FORM_ID"
+    }
+  ],
+  "publishing": {
+    "draft_revision": 8,
+    "published_revision": 7,
+    "publish_requires": [
+      "administrator_approval",
+      "consistent_prices",
+      "verified_inventory",
+      "approved_assets"
+    ],
+    "note": "Las reglas de publicación aquí ilustran el objetivo v2; no todas están implementadas de esta manera actualmente."
+  }
+}

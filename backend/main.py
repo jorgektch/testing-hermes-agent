@@ -19,7 +19,6 @@ MAX_TURNS = 14
 class ChatRequest(BaseModel):
     token: str = Field(min_length=20, max_length=80_000)
     message: str = Field(min_length=1, max_length=2_000)
-    history: list[dict] = Field(default_factory=list, max_length=120)
 
 
 def check_access(code: str | None) -> None:
@@ -46,7 +45,7 @@ def start_session(x_demo_access_code: str | None = Header(default=None)):
     check_access(x_demo_access_code)
     try:
         state = domain.blank_state()
-        payload = {'session_id': str(uuid.uuid4()), 'state': state}
+        payload = {'session_id': str(uuid.uuid4()), 'state': state, 'history': []}
         token = security.sign(payload)
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
@@ -64,13 +63,15 @@ def interact(body: ChatRequest, x_demo_access_code: str | None = Header(default=
     state = copy.deepcopy(payload['state'])
     if state['turn_count'] >= MAX_TURNS:
         raise HTTPException(429, 'This single-use demo session has reached its turn limit.')
-    # Bound client-provided history; exclude attempts to inject a new system
-    # message. Hermes requires tool messages from previous turns for context.
-    history = [item for item in body.history if item.get('role') in {'user', 'assistant', 'tool'}][-65:]
-    if len(str(history)) > 150_000:
-        raise HTTPException(400, 'Conversation history exceeds demo limits.')
+    # Prior model/tool messages are obtained ONLY from the signed session token.
+    # The caller cannot forge Hermes tool results or replay arbitrary roles.
+    history = payload.get('history', [])
+    if not isinstance(history,list) or len(str(history)) > 250_000:
+        raise HTTPException(400, 'Session history exceeds demo limits.')
     try:
+        domain.begin_turn(state, body.message.strip())
         result = chat(body.message.strip(), history, state)
+        domain.end_turn(state, result['reply'])
     except Exception as exc:
         # Do not return provider error bodies (which might contain secrets).
         import logging
@@ -78,9 +79,11 @@ def interact(body: ChatRequest, x_demo_access_code: str | None = Header(default=
         raise HTTPException(503, 'The AI advisor is temporarily unavailable. Try again shortly; your session was not charged a turn.') from exc
     state['turn_count'] += 1
     payload['state'] = state
+    # Hermes returns the complete continuation history; never accept it from browser input.
+    payload['history'] = result['history'][-90:]
     try:
         new_token = security.sign(payload)
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
-    return {'reply': result['reply'], 'history': result['history'],
+    return {'reply': result['reply'], 'history': [],
             'state': state, 'token': new_token, 'max_turns': MAX_TURNS}

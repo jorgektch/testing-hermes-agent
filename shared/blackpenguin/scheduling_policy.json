@@ -1,0 +1,18 @@
+{
+  "schema_version": "hermes-demo/scheduling-policy/1.0",
+  "example_only": true,
+  "project_id": "22222222-2222-4222-8222-222222222222",
+  "timezone": "America/Lima",
+  "visit_duration_minutes": 45,
+  "buffer_after_minutes": 15,
+  "slot_search_step_minutes": 30,
+  "booking_horizon_days": 14,
+  "maximum_offered_options": 3,
+  "offer_expiration_minutes": 30,
+  "allow_general_project_visit": true,
+  "require_explicit_confirmation": true,
+  "revalidate_on_confirm": true,
+  "max_confirmed_visits_per_demo_session": 1,
+  "external_calendar_sync": "simulation",
+  "shared_capacity": "not_available_without_database"
+}

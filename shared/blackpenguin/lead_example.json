@@ -1,0 +1,241 @@
+{
+  "_meta": {
+    "purpose": "Synthetic illustrative demo episode aligned with Project v2. Not a direct database export.",
+    "schema": "current relational tables + illustrative values; some fields omitted",
+    "repository_commit": "0ab19e793540737626c259d8a20883330fa65143",
+    "source_file": "BlackPenguin_Lead_y_Dialogo_ejemplo.json",
+    "scenario": "Optional example, not the initial state of the chat."
+  },
+  "ids": {
+    "company_id": "11111111-1111-4111-8111-111111111111",
+    "project_id": "22222222-2222-4222-8222-222222222222",
+    "lead_id": "33333333-3333-4333-8333-333333333333",
+    "conversation_id": "44444444-4444-4444-8444-444444444444",
+    "contact_id": "55555555-5555-4555-8555-555555555555",
+    "property_type_id": "66666666-6666-4666-8666-666666666661",
+    "unit_id": "77777777-7777-4777-8777-777777777771",
+    "msg1": "88888888-8888-4888-8888-888888888888",
+    "msg2": "99999999-9999-4999-8999-999999999999"
+  },
+  "captured_at": "2026-11-20T14:00:00Z",
+  "leads": {
+    "id": "33333333-3333-4333-8333-333333333333",
+    "company_id": "11111111-1111-4111-8111-111111111111",
+    "project_id": "22222222-2222-4222-8222-222222222222",
+    "campaign_id": null,
+    "contact_id": "55555555-5555-4555-8555-555555555555",
+    "full_name": "Alex Rivera",
+    "phone": "+15550001001",
+    "email": "alex@example.com",
+    "source": "Meta Lead Ads (simulated)",
+    "platform": "meta",
+    "preferred_channel": "simulation",
+    "consent_status": "captured_by_source",
+    "intent_score": "0.33",
+    "intent_tier": "cold",
+    "assigned_segment": null,
+    "pipeline_stage": "S02_QUALIFICATION",
+    "funnel_stage": "contacted",
+    "agent_status": "active",
+    "meta_form_data": {
+      "form_id": "EXAMPLE_FORM_ID",
+      "leadgen_id": "EXAMPLE_LEAD_ID",
+      "campaign_name": "META-2026-11"
+    },
+    "lead_profile_data": {
+      "schema_version": 1,
+      "sales_profile": {
+        "version": "sales-lead-profile/2.0",
+        "current": {
+          "budget": {
+            "id": "synthetic-budget-1",
+            "field": "budget",
+            "value": "USD 350000",
+            "status": "declared",
+            "source": "active_conversation",
+            "captured_at": "2026-11-20T14:00:00Z",
+            "evidence": "My budget is USD 350000.",
+            "source_ref": {
+              "message_id": "99999999-9999-4999-8999-999999999999"
+            },
+            "polarity": "affirmative"
+          },
+          "bedrooms": {
+            "id": "synthetic-bedrooms-1",
+            "field": "bedrooms",
+            "value": 3,
+            "status": "declared",
+            "source": "active_conversation",
+            "captured_at": "2026-11-20T14:00:00Z",
+            "evidence": "I need 3 bedrooms.",
+            "source_ref": {
+              "message_id": "99999999-9999-4999-8999-999999999999"
+            },
+            "polarity": "affirmative"
+          },
+          "needs": {
+            "id": "synthetic-needs-1",
+            "field": "needs",
+            "value": "open kitchen and a private backyard",
+            "status": "declared",
+            "source": "active_conversation",
+            "captured_at": "2026-11-20T14:00:00Z",
+            "evidence": "I need an open kitchen and a private backyard.",
+            "source_ref": {
+              "message_id": "99999999-9999-4999-8999-999999999999"
+            },
+            "polarity": "affirmative"
+          },
+          "property_interest": {
+            "id": "synthetic-property_interest-1",
+            "field": "property_interest",
+            "value": "Three-Bedroom Family House",
+            "status": "declared",
+            "source": "approved_catalog_selection",
+            "captured_at": "2026-11-20T14:00:00Z",
+            "evidence": "I like the Three-Bedroom Family House.",
+            "source_ref": {
+              "message_id": "99999999-9999-4999-8999-999999999999",
+              "property_type_id": "66666666-6666-4666-8666-666666666661"
+            },
+            "polarity": "affirmative"
+          }
+        },
+        "history": []
+      },
+      "active_qualification": {
+        "asked": [
+          "budget",
+          "property_interest"
+        ],
+        "missing": [
+          "purchase_timeline"
+        ]
+      }
+    },
+    "qualification_summary": "Budget USD 350000; 3 bedrooms; open kitchen and backyard; interested in Three-Bedroom Family House (synthetic demo).",
+    "created_at": "2026-11-20T14:00:00Z",
+    "deleted_at": null,
+    "is_demo": true,
+    "is_test": true
+  },
+  "lead_contacts": {
+    "id": "55555555-5555-4555-8555-555555555555",
+    "company_id": "11111111-1111-4111-8111-111111111111",
+    "canonical_phone": "+15550001001",
+    "preferred_channel": "whatsapp"
+  },
+  "sales_conversations": {
+    "id": "44444444-4444-4444-8444-444444444444",
+    "company_id": "11111111-1111-4111-8111-111111111111",
+    "project_id": "22222222-2222-4222-8222-222222222222",
+    "lead_id": "33333333-3333-4333-8333-333333333333",
+    "channel": "simulation",
+    "provider": "hermes_web_demo",
+    "stage": "contacted",
+    "is_paused": false,
+    "continuity_json": {
+      "lead_id": "33333333-3333-4333-8333-333333333333",
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "epoch": 1,
+      "last_inbound_message_id": "99999999-9999-4999-8999-999999999999",
+      "waiting_for_lead": false
+    }
+  },
+  "sales_conversation_lead_contexts": [
+    {
+      "conversation_id": "44444444-4444-4444-8444-444444444444",
+      "lead_id": "33333333-3333-4333-8333-333333333333",
+      "is_active": true,
+      "activated_at": "2026-11-20T14:00:00Z"
+    }
+  ],
+  "sales_messages": [
+    {
+      "id": "88888888-8888-4888-8888-888888888888",
+      "conversation_id": "44444444-4444-4444-8444-444444444444",
+      "role": "assistant",
+      "direction": "outbound",
+      "channel": "simulation",
+      "content": "Hi Alex, thanks for your interest in Residencial Jardines del Sol. This is a fictional test chat.",
+      "status": "delivered",
+      "metadata_json": {
+        "lead_id": "33333333-3333-4333-8333-333333333333",
+        "event_kind": "meta_lead_first_contact",
+        "delivery_kind": "whatsapp_template",
+        "template_name": "approved_initial_template"
+      }
+    },
+    {
+      "id": "99999999-9999-4999-8999-999999999999",
+      "conversation_id": "44444444-4444-4444-8444-444444444444",
+      "role": "user",
+      "direction": "inbound",
+      "channel": "simulation",
+      "content": "I need 3 bedrooms, an open kitchen and a private backyard. My budget is USD 350000. I like the Three-Bedroom Family House.",
+      "status": "received",
+      "metadata_json": {
+        "lead_id": "33333333-3333-4333-8333-333333333333"
+      }
+    }
+  ],
+  "sales_dialogue_states": {
+    "company_id": "11111111-1111-4111-8111-111111111111",
+    "project_id": "22222222-2222-4222-8222-222222222222",
+    "conversation_id": "44444444-4444-4444-8444-444444444444",
+    "lead_id": "33333333-3333-4333-8333-333333333333",
+    "revision": 2,
+    "schema_version": "sales-dialogue/1.0",
+    "state_json": {
+      "version": "sales-dialogue/1.0",
+      "selected_property_type_id": "66666666-6666-4666-8666-666666666661",
+      "selected_unit_id": null,
+      "tasks": [
+        {
+          "topic": "catalog",
+          "status": "completed",
+          "source_message_id": "99999999-9999-4999-8999-999999999999"
+        }
+      ],
+      "constraints": [],
+      "property_constraints": [],
+      "offers": [],
+      "preferences": [],
+      "memory": {
+        "version": "sales-turn-memory/1.0",
+        "as_of_message_id": "99999999-9999-4999-8999-999999999999",
+        "recent_turns": [],
+        "answered_topics": [
+          "catalog"
+        ]
+      },
+      "booking_search": {},
+      "booking_proposal": null,
+      "cadence_status": "active"
+    }
+  },
+  "lead_score_snapshots": [
+    {
+      "lead_id": "33333333-3333-4333-8333-333333333333",
+      "total_score": 33,
+      "assigned_tier": "cold",
+      "factor_breakdown": {
+        "timeline": 0,
+        "financial_readiness": 0,
+        "budget_fit": 20,
+        "engagement": 3,
+        "decision_authority": 0,
+        "specificity": 10,
+        "appointment_intent": 0
+      },
+      "scoring_version": "sales-declared-signals/1.0"
+    }
+  ],
+  "meetings": [],
+  "sales_follow_up_jobs": [],
+  "example_next_steps": [
+    "ask purchase_timeline",
+    "show approved catalog options",
+    "offer 45-minute in-person visit upon expressed interest"
+  ]
+}
