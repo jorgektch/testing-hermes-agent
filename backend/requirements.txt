@@ -1,0 +1,6 @@
+fastapi>=0.115,<1
+uvicorn>=0.32,<1
+pydantic>=2.10,<3
+# Real Nous Research Hermes Agent, pinned to its Python >=3.11-compatible tree.
+# This is NOT a proxy-only imitation. Builds may be large/slow on Vercel.
+hermes-agent @ git+https://github.com/NousResearch/hermes-agent.git@b94cb8e2c4ebf2a8c7688cf676c3cf9899584adb

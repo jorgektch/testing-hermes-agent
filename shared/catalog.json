@@ -1,0 +1,163 @@
+{
+  "project_info": {
+    "project_id": "EVR-001",
+    "name": "Evergreen Park Residences",
+    "developer": "Evergreen Urban Developments (fictional demo)",
+    "location": {
+      "street_address": "Av. Primavera 1590 (fictional demo address)",
+      "district": "Santiago de Surco",
+      "city": "Lima",
+      "country": "Peru",
+      "timezone": "America/Lima",
+      "onsite_showroom": "Sales showroom at the project entrance"
+    },
+    "value_proposition": "A gated, low-density community combining constructed apartments and townhouses, green spaces, contemporary finishes, and easy access to schools, shopping, and major transport routes.",
+    "amenities": [
+      "Landscaped central park",
+      "24/7 security",
+      "Swimming pool",
+      "Gym and yoga studio",
+      "Children's playground",
+      "Coworking lounge",
+      "Visitor parking",
+      "Pet-friendly walking paths"
+    ],
+    "general_brochure_pdf": "/demo-assets/evergreen-overview.pdf",
+    "media_disclaimer": "Synthetic project, advisors, inventory and files created exclusively for a demo. Not a real property offer."
+  },
+  "properties": [
+    {
+      "unit_id": "EV-A101",
+      "property_type": "Apartment",
+      "commercial_name": "Garden View Two-Bedroom",
+      "bedrooms": 2,
+      "bathrooms": 2,
+      "area_sqm": 78,
+      "price_usd": 149000,
+      "available_from_date": "Immediate",
+      "status": "Available",
+      "highlights": [
+        "Sunlit living room",
+        "Park-facing balcony",
+        "Open-plan kitchen"
+      ],
+      "media": {
+        "gallery_urls": [
+          "/demo-assets/EV-A101-01.svg",
+          "/demo-assets/EV-A101-02.svg"
+        ],
+        "floorplan_brochure_pdf": "/demo-assets/EV-A101-floorplan.pdf"
+      }
+    },
+    {
+      "unit_id": "EV-A204",
+      "property_type": "Apartment",
+      "commercial_name": "Skyline Family Three-Bedroom",
+      "bedrooms": 3,
+      "bathrooms": 2,
+      "area_sqm": 104,
+      "price_usd": 198000,
+      "available_from_date": "2026-12-15",
+      "status": "Last Unit",
+      "highlights": [
+        "Corner unit",
+        "Large family dining area",
+        "Panoramic windows"
+      ],
+      "media": {
+        "gallery_urls": [
+          "/demo-assets/EV-A204-01.svg",
+          "/demo-assets/EV-A204-02.svg"
+        ],
+        "floorplan_brochure_pdf": null
+      }
+    },
+    {
+      "unit_id": "EV-H03",
+      "property_type": "House",
+      "commercial_name": "Courtyard Three-Bedroom Townhouse",
+      "bedrooms": 3,
+      "bathrooms": 3,
+      "area_sqm": 164,
+      "price_usd": 279000,
+      "available_from_date": "2027-03-01",
+      "status": "Available",
+      "highlights": [
+        "Private courtyard",
+        "Two parking spaces",
+        "Separate home office"
+      ],
+      "media": {
+        "gallery_urls": [],
+        "floorplan_brochure_pdf": "/demo-assets/EV-H03-floorplan.pdf"
+      }
+    },
+    {
+      "unit_id": "EV-H08",
+      "property_type": "House",
+      "commercial_name": "Premium Four-Bedroom Family House",
+      "bedrooms": 4,
+      "bathrooms": 3,
+      "area_sqm": 218,
+      "price_usd": 355000,
+      "available_from_date": "2027-01-20",
+      "status": "Last Unit",
+      "highlights": [
+        "Private garden",
+        "Family TV room",
+        "Spacious primary suite"
+      ],
+      "media": {
+        "gallery_urls": [
+          "/demo-assets/EV-H08-01.svg",
+          "/demo-assets/EV-H08-02.svg"
+        ],
+        "floorplan_brochure_pdf": "/demo-assets/EV-H08-floorplan.pdf"
+      }
+    }
+  ],
+  "sales_advisors": [
+    {
+      "advisor_id": "ADV-01",
+      "name": "Olivia Bennett",
+      "specialty": "Apartments and first-time residential buyers",
+      "schedule_template": {
+        "1": [
+          "08:00-14:00"
+        ],
+        "5": [
+          "09:00-13:00"
+        ]
+      }
+    },
+    {
+      "advisor_id": "ADV-02",
+      "name": "Daniel Rivera",
+      "specialty": "Family houses and premium residential homes",
+      "schedule_template": {
+        "3": [
+          "16:00-18:00"
+        ],
+        "7": [
+          "09:00-13:00"
+        ]
+      }
+    },
+    {
+      "advisor_id": "ADV-03",
+      "name": "Sophia Chen",
+      "specialty": "Property tours and neighborhood comparisons",
+      "schedule_template": {
+        "1": [
+          "10:00-14:00"
+        ],
+        "3": [
+          "09:00-13:00"
+        ],
+        "5": [
+          "16:00-18:00"
+        ]
+      }
+    }
+  ]
+}
