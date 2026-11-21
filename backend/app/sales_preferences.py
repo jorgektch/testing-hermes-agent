@@ -51,7 +51,7 @@ def parse_declarations(message: str) -> dict:
         r"\b(?:my|our|i|we|i'm|i've|i can|we can|i'd|i do|i dont|i don't)\b", text))
     if buyer:
         budget_clause = re.search(
-            r"\b(?:budget|spend|afford|pay|price range|price bracket|cost|funds|available|go up to)\b", text)
+            r"\b(?:budget|spend|afford|pay|price|listing|price range|price bracket|cost|funds|available|go up to|max|maximum|min|minimum)\b", text)
         if budget_clause:
             budget_text = text[budget_clause.start():]
             between = re.search(
