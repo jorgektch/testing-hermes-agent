@@ -546,101 +546,134 @@ def project_overview() -> dict:
     return {'ok': True, 'project_info': read_catalog()['project_info']}
 
 
-def evaluate_properties(state: dict, max_budget_usd: int,
+def evaluate_properties(state: dict, max_budget_usd: int | None = None,
                         target_purchase_timeframe: str | None = None,
                         min_bedrooms: int | None = None,
                         preferred_property_type: str | None = None,
                         required_features: dict | None = None) -> dict:
+    """Rank literal buyer matches. Never silently relax a declared constraint."""
+    lead = state.get('lead', {})
+    prefs = copy.deepcopy(_preferences(state))
     try:
-        budget = int(max_budget_usd)
-        lead = state.get('lead', {})
-        # A tool call may not silently relax an already declared hard cap.
-        # This safeguards matching even if Hermes passes an incorrect value.
-        declared_budget = lead.get('budget_usd')
-        if declared_budget is not None:
-            budget = min(budget, int(declared_budget))
-        beds = int(min_bedrooms) if min_bedrooms is not None else None
-        declared_beds = lead.get('min_bedrooms')
-        if declared_beds is not None:
-            beds = max(beds or 0, int(declared_beds))
-        if budget <= 0 or (beds is not None and (beds < 1 or beds > 20)):
+        fallback_max = int(max_budget_usd) if max_budget_usd is not None else None
+        if fallback_max is not None and fallback_max <= 0:
             raise ValueError
-    except (TypeError, ValueError):
-        return {'error': 'Provide a positive integer budget and valid minimum bedrooms.'}
-    allowed_types={'house':'House','apartment':'Apartment','either':None}
-    chosen=preferred_property_type or state.get('lead',{}).get('property_type') or 'Either'
-    chosen_type=allowed_types.get(str(chosen).strip().lower(),'invalid')
-    if chosen_type=='invalid':return {'error':'Preferred property type must be Apartment, House or Either.'}
-    filter_features=required_features or {}
-    if not isinstance(filter_features,dict):return {'error':'required_features must be a JSON object.'}
-    allowed_features={'kitchen_layout','private_backyard','backyard_area_m2',
-                      'private_terrace','parking_spaces'}
-    if set(filter_features)-allowed_features:
-        return {'error':'Unsupported feature filters. Use only confirmed, typed features.'}
+        fallback_beds = int(min_bedrooms) if min_bedrooms is not None else None
+        if fallback_beds is not None and not 1 <= fallback_beds <= 20:
+            raise ValueError
+    except (ValueError, TypeError):
+        return {'error': 'Invalid maximum budget or bedroom criteria.'}
+    # Explicit current state wins over stale model arguments, including a
+    # newly increased maximum. A soft target is not a hard spending limit.
+    if prefs['budget']['mode'] == 'unknown':
+        cap = lead.get('budget_usd') or fallback_max
+        if cap is not None:
+            prefs['budget'].update(mode='cap', maximum_usd=int(cap))
+    if prefs['bedrooms']['mode'] == 'unknown':
+        beds = lead.get('min_bedrooms') or fallback_beds
+        if beds is not None:
+            prefs['bedrooms'].update(mode='minimum', minimum=int(beds))
+    allowed_types = {'house':'House','apartment':'Apartment','either':None}
+    chosen = preferred_property_type or lead.get('property_type') or 'Either'
+    chosen_type = allowed_types.get(str(chosen).strip().lower(), 'invalid')
+    if chosen_type == 'invalid':
+        return {'error':'Preferred property type must be House, Apartment or Either.'}
+    features = required_features or {}
+    if not isinstance(features, dict):
+        return {'error':'Required features must be a JSON object.'}
+    allowed_features = {'kitchen_layout','private_backyard','backyard_area_m2',
+                        'private_terrace','parking_spaces'}
+    if set(features)-allowed_features:
+        return {'error':'Unsupported confirmed-feature filter.'}
     try:
-        for key,value in filter_features.items():
+        for key,value in features.items():
             if key in ('parking_spaces','backyard_area_m2'):
                 float(value)
             elif key in ('private_backyard','private_terrace') and not isinstance(value,bool):
-                raise ValueError('Boolean feature value required')
+                raise ValueError
             elif key=='kitchen_layout' and value not in ('open','closed','semi_open'):
-                raise ValueError('Invalid kitchen layout')
-    except (ValueError,TypeError):
-        return {'error':'Invalid value for typed feature filter.'}
-    deadline, interpretation = parse_target_date(target_purchase_timeframe)
-    matches, out_budget, other = [], [], []
-    for raw_unit in read_catalog()['properties']:
-        unit = copy.deepcopy(raw_unit)
-        unit['ready_by_purchase_deadline'] = None if deadline is None else ready_date(unit) <= deadline
-        if unit['price_usd'] > budget:
-            unit['exceeds_budget_by_usd'] = unit['price_usd'] - budget
-            out_budget.append(unit)
-        elif chosen_type and unit['property_type']!=chosen_type:
-            unit['mismatch_reason']='Different property category from the lead preference'
-            other.append(unit)
-        elif beds and unit['bedrooms'] < beds:
-            unit['mismatch_reason'] = 'Fewer bedrooms than requested'
-            other.append(unit)
-        elif any(
+                raise ValueError
+    except (ValueError, TypeError):
+        return {'error':'Invalid confirmed-feature filter value.'}
+    deadline, interpretation = parse_target_date(
+        target_purchase_timeframe or lead.get('purchase_timeframe'))
+    primary, alternatives, out_budget, other = [], [], [], []
+    for raw in read_catalog()['properties']:
+        unit=copy.deepcopy(raw)
+        unit['ready_by_purchase_deadline']=None if deadline is None else ready_date(unit)<=deadline
+        eligible, violations, deviations=sales_preferences.filter_unit(unit,prefs)
+        if chosen_type and unit['property_type']!=chosen_type:
+            violations.append('Different property category')
+        if any(
             key not in unit.get('confirmed_features',{}) or
             (float(unit['confirmed_features'][key])!=float(want) if key in ('parking_spaces','backyard_area_m2')
              else unit['confirmed_features'][key]!=want)
-            for key,want in filter_features.items()
+            for key,want in features.items()
         ):
-            unit['mismatch_reason']='Does not meet all confirmed required features'
-            other.append(unit)
-        elif deadline is not None and ready_date(unit) > deadline:
-            unit['mismatch_reason'] = 'Not ready by the target purchase date'
-            other.append(unit)
+            violations.append('Missing a required verified feature')
+        if deadline is not None and ready_date(unit)>deadline:
+            violations.append('Not ready by the stated purchase deadline')
+        if violations:
+            unit['mismatch_reason']='; '.join(violations)
+            if 'Exceeds the declared maximum budget' in violations:
+                cap=prefs['budget']['maximum_usd']
+                if cap is not None:unit['exceeds_budget_by_usd']=unit['price_usd']-cap
+                out_budget.append(unit)
+            else:
+                other.append(unit)
+        elif deviations:
+            unit['mismatch_reason']='; '.join(deviations)
+            unit['alternative_only']=True
+            alternatives.append(unit)
         else:
-            matches.append(unit)
-    # Prefer the home closest to the requested bedroom count; 2-bed before
-    # 3-bed when the lead asks for at least two, while retaining valid extras.
-    matches.sort(key=lambda unit: ((unit['bedrooms']-beds) if beds else 0,
-                                   unit['price_usd'], unit['unit_id']))
-    out_budget.sort(key=lambda unit: (unit['exceeds_budget_by_usd'], unit['unit_id']))
-    state['shortlisted_unit_ids'] = [u['unit_id'] for u in matches]
-    state['stage'] = 'Properties matched' if matches else 'Exploring alternatives'
-    record(state, 'matching', f'{len(matches)} matching properties · ${budget:,} budget')
-    # Search tool returns an SMS-sized decision overview, never full cards,
-    # brochures, gallery links or amenities. A separate tool loads one house.
-    def compact(unit: dict) -> dict:
-        fields = ('unit_id', 'commercial_name', 'property_type', 'bedrooms',
-                  'price_usd', 'available_from_date', 'status',
-                  'ready_by_purchase_deadline', 'exceeds_budget_by_usd', 'mismatch_reason')
-        return {key: unit[key] for key in fields if key in unit}
+            primary.append(unit)
+    target_beds=(prefs['bedrooms'].get('preferred') or prefs['bedrooms'].get('minimum') or 0)
+    target_price=prefs['budget'].get('target_usd') or 0
+    def order(u):
+        return (abs(u['bedrooms']-target_beds) if target_beds else 0,
+                abs(u['price_usd']-target_price) if target_price else u['price_usd'],
+                u['unit_id'])
+    primary.sort(key=order)
+    alternatives.sort(key=order)
+    out_budget.sort(key=lambda u:(u.get('exceeds_budget_by_usd',0),u['unit_id']))
+    state['shortlisted_unit_ids']=[u['unit_id'] for u in primary]
+    state['stage']='Properties matched' if primary else 'Exploring alternatives'
+    record(state,'matching',f"{len(primary)} exact matches; {len(alternatives)} optional alternatives")
+    def compact(u):
+        fields=('unit_id','commercial_name','property_type','bedrooms',
+                'price_usd','available_from_date','status',
+                'ready_by_purchase_deadline','exceeds_budget_by_usd',
+                'mismatch_reason','alternative_only')
+        return {k:u[k] for k in fields if k in u}
+    spoken=str(state.get('_active_source_message_text') or '')
+    alternatives_requested=bool(re.search(
+        r'\b(?:alternative|alternatives|other options|other houses|anything else|'
+        r'what else|more options|more bedrooms|flexible|similar houses)\b',
+        spoken, flags=re.I))
+    # Unless explicitly requested, deviations are not sold as matches.
+    optional=[compact(u) for u in alternatives[:3]] if alternatives_requested else []
+    state['_allowed_alternative_units_this_turn']={
+        u['unit_id'] for u in optional}
     return {
-        'ok': True,
-        'applied_criteria': {'max_budget_usd': budget, 'min_bedrooms': beds,
-                             'preferred_property_type': chosen_type or 'Either',
-                             'transaction_type': 'sale'},
-        'matching_properties': [compact(u) for u in matches],
-        'out_of_budget_properties': [compact(u) for u in out_budget],
-        'other_nonmatching_properties': [compact(u) for u in other],
-        'next_action': 'Offer a brief list of matching houses and ask which ONE to explore; no unsolicited media.',
-        'interpreted_purchase_deadline': deadline.isoformat() if deadline else None,
-        'timeframe_interpretation': interpretation,
-        'note': 'Only fictional houses for sale are listed. The maximum declared budget is a hard cap; over-budget homes are NOT matches and must not be proactively recommended. Financing details are discussed only at the onsite visit.'
+        'ok':True,
+        'applied_criteria':{
+            'budget':prefs['budget'],'bedrooms':prefs['bedrooms'],
+            'preferred_property_type':chosen_type or 'Either',
+            'transaction_type':'sale',
+        },
+        'matching_properties':[compact(u) for u in primary],
+        'optional_alternatives':optional,
+        'out_of_budget_properties':[compact(u) for u in out_budget],
+        'other_nonmatching_properties':[compact(u) for u in other],
+        'interpreted_purchase_deadline':deadline.isoformat() if deadline else None,
+        'timeframe_interpretation':interpretation,
+        'next_action':('Present only actual matching houses; identify any buyer-requested '
+                       'alternative as OPTIONAL and explain the specific difference. '
+                       'Do not bring up an alternative without a request; '
+                       'do not push booking before answering the buyer.'),
+        'note':'Buyer budget ceilings and exact bedroom constraints are authoritative. '
+               'Soft bedroom differences are labeled alternatives, NEVER matches. '
+               'Inventory, prices and advisors are fictional.'
     }
 
 
