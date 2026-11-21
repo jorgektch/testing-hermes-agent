@@ -894,7 +894,10 @@ def search_properties(state: dict, criteria: dict | None = None,
     session=search_sessions.save_search(state,search,result)
     state['conversation_phase']='exploration'
     state['stage']='Exploring property alternatives'
-    state['_turn_intent']='property_search'
+    # A tool execution does not rewrite the original buyer intent. An
+    # explicit budget revision is both a preference update and a search.
+    if state.get('_turn_intent')!='preference_update':
+        state['_turn_intent']='property_search'
     state['_search_tool_called_this_turn']=True
     state['_matching_options_this_turn']=result['matching_properties']
     state['_search_out_of_budget_this_turn']=result.get('out_of_budget_properties') or []
