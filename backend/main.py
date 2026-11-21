@@ -32,6 +32,19 @@ COOKIE = 'hermes_lab_session'
 PROJECT_ZONE = ZoneInfo('America/Lima')
 
 
+def allow_weak_demo_credentials() -> bool:
+    """Explicit opt-in for synthetic testing ONLY; unsafe on public deployments.
+
+    With this set, anyone who knows the demo credential can act as administrator.
+    A short signing secret also weakens CSRF protection. Keep disabled by default.
+    """
+    return os.environ.get('DEMO_ALLOW_WEAK_CREDENTIALS', '').strip().lower() in ('true', '1', 'yes')
+
+
+def accepted_demo_credential(value: str, minimum_length: int) -> bool:
+    return len(value) >= minimum_length or (allow_weak_demo_credentials() and value == 'demo')
+
+
 class LoginInput(BaseModel):
     role: str
     credential: str = Field(min_length=1, max_length=200)
@@ -68,7 +81,7 @@ def csrf_for(request: Request) -> str:
     # Header must match server-issued value. Cookie is HttpOnly and same-site.
     token=request.cookies.get(COOKIE,'')
     secret=os.environ.get('DEMO_SIGNING_SECRET','')
-    if not secret or len(secret)<32:
+    if not accepted_demo_credential(secret, 32):
         raise HTTPException(503,'Configure DEMO_SIGNING_SECRET (32+ characters).')
     return hmac.new(secret.encode(),('csrf:'+token).encode(),hashlib.sha256).hexdigest()
 
@@ -109,7 +122,7 @@ def catalog():
 def login(body: LoginInput, request: Request, response: Response):
     if body.role == 'administrator':
         expected=os.environ.get('DEMO_ADMIN_PASSWORD','')
-        if len(expected)<16:
+        if not accepted_demo_credential(expected, 16):
             raise HTTPException(503,'A strong DEMO_ADMIN_PASSWORD (16+ characters) is required.')
     elif body.role == 'evaluator':
         expected=os.environ.get('DEMO_ACCESS_CODE','')
@@ -130,7 +143,7 @@ def login(body: LoginInput, request: Request, response: Response):
 
 def csrf_for_value(token: str) -> str:
     secret=os.environ.get('DEMO_SIGNING_SECRET','')
-    if len(secret)<32:raise HTTPException(503,'DEMO_SIGNING_SECRET must have at least 32 characters.')
+    if not accepted_demo_credential(secret, 32):raise HTTPException(503,'DEMO_SIGNING_SECRET must have at least 32 characters.')
     return hmac.new(secret.encode(),('csrf:'+token).encode(),hashlib.sha256).hexdigest()
 
 

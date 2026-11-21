@@ -38,6 +38,26 @@ flowchart LR
 
 Upstream Nous `hermes-agent` is pinned to commit `b94cb8e2c4ebf2a8c7688cf676c3cf9899584adb` for Python 3.12 compatibility; it is a sizeable dependency for serverless. Its writing of logs/sessions is redirected to `HERMES_HOME=/tmp/hermes-agent` in Vercel/AWS Lambda automatically when this variable is not set.
 
+### Insecure convenience credentials for synthetic testing (opt-in only)
+
+By default, the signing secret requires at least 32 characters and the administrator
+password requires at least 16 characters. For an **isolated, synthetic-only test**
+you can opt into the following intentionally insecure configuration:
+
+```dotenv
+DEMO_SIGNING_SECRET=demo
+DEMO_ADMIN_PASSWORD=demo
+DEMO_ACCESS_CODE=demo
+DEMO_ALLOW_WEAK_CREDENTIALS=true
+```
+
+**Do not enable this on a publicly shared or production deployment.** The
+administrator credential becomes publicly guessable: any visitor who tries
+`demo` can view and permanently delete *all* leads. The signing key is also
+predictable, degrading CSRF integrity. Use a strong signing key and a distinct
+administrator password when publishing the URL. The switch is disabled unless
+set explicitly and never overrides stronger credentials.
+
 ## Local setup
 
 Requirements: Node.js 20+, Python 3.12, `pip`, Git, OpenRouter API key.

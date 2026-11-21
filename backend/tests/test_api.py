@@ -199,3 +199,33 @@ def test_booking_calendar_cross_owner_privacy(env):
     after_calendar=visitor.get('/api/calendar',params=params).json()
     assert len(after_calendar['slots'])>=before
     assert not any(x['id']==booked['meeting']['id'] for x in after_calendar['meetings'])
+
+
+def test_insecure_demo_credentials_require_explicit_opt_in(env, monkeypatch):
+    """The three 'demo' credentials work only with the explicit unsafe switch."""
+    monkeypatch.setenv('DEMO_SIGNING_SECRET', 'demo')
+    monkeypatch.setenv('DEMO_ADMIN_PASSWORD', 'demo')
+    monkeypatch.setenv('DEMO_ACCESS_CODE', 'demo')
+    monkeypatch.delenv('DEMO_ALLOW_WEAK_CREDENTIALS', raising=False)
+    client = TestClient(main.app)
+    for role in ('administrator', 'evaluator'):
+        response = client.post('/api/auth/login', json={'role': role, 'credential': 'demo'})
+        assert response.status_code == 503
+    monkeypatch.setenv('DEMO_ALLOW_WEAK_CREDENTIALS', 'true')
+    for role in ('evaluator', 'administrator'):
+        current = TestClient(main.app)
+        response = current.post('/api/auth/login', json={'role': role, 'credential': 'demo'})
+        assert response.status_code == 200, response.text
+        assert current.get('/api/me').status_code == 200
+        csrf = response.json()['csrf_token']
+        assert current.post('/api/auth/logout', headers={'X-Demo-Csrf': csrf}).status_code == 200
+    wrong = client.post('/api/auth/login', json={'role': 'administrator', 'credential': 'wrong'})
+    assert wrong.status_code == 401
+
+
+def test_strong_credentials_still_work_with_weak_switch_disabled(env, monkeypatch):
+    monkeypatch.delenv('DEMO_ALLOW_WEAK_CREDENTIALS', raising=False)
+    assert main.accepted_demo_credential('a' * 32, 32)
+    assert main.accepted_demo_credential('strong-admin-pass', 16)
+    assert not main.accepted_demo_credential('demo', 16)
+    assert not main.accepted_demo_credential('demo', 32)
