@@ -94,6 +94,10 @@ def _search_answer_needs_repair(plain: str, state: dict, matches: list[dict]) ->
     if codes-valid-extras:
         return True
     if not matches:
+        # A no-match answer can offer one verified closest option without
+        # relaxing the hard cap. Require that disclosure if one exists.
+        if closest.get('unit_id') and closest['unit_id'] not in codes:
+            return True
         if not re.search(
             r'\b(?:no (?:houses?|homes?|properties|matches|listings|options)|'
             r"don.t (?:currently )?have|do not (?:currently )?have|"
