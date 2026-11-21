@@ -68,7 +68,7 @@ def parse_declarations(message: str) -> dict:
                     value = numbers[-1]
                     if re.search(r'\b(?:exact(?:ly)?\s+(?:priced?|price|listing)|(?:listing\s+)?price\s+(?:must|should)\s+be\s+exactly|(?:listing\s+)?price\s+exactly|(?:listing\s+)?(?:priced?)\s+at\s+exactly)\b', text):
                         changes['budget'] = {'mode':'exact_price','exact_price_usd':value}
-                    elif re.search(r'\b(?:no more than|not more than|up to|at most|maximum|max\b|ceiling|under|less than|don.t want to spend more than|go up to|raise my budget to|increase my budget to|my new maximum is)\b', text):
+                    elif re.search(r'\b(?:no more than|not more than|up to|at most|maximum|max\b|ceiling|under|less than|(?:do not|don.t|dont) want to spend more than|go up to|raise my budget to|increase my budget to|my new maximum is)\b', text):
                         changes['budget'] = {'mode':'cap','maximum_usd':value}
                     elif re.search(r'\b(?:at least|minimum|min\b|from\s+\$|above)\b', text):
                         changes['budget'] = {'mode':'floor','minimum_usd':value}
