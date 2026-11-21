@@ -49,7 +49,7 @@ def test_registered_hermes_tools_emit_observations_without_replacing_agent(monke
     outcome = hermes_runtime.chat("I'm looking for a 2-bedroom house", [], state,
                                   on_tool_state=notifications.append)
     assert outcome['reply'].startswith('I can help')
-    assert len(registry.handlers) == 13
+    assert len(registry.handlers) == 14
     assert notifications and notifications[0]['tool'] == 'update_lead_profile'
     assert notifications[0]['profile']['lead']['min_bedrooms'] == 2
     assert state['tool_observations'][-1]['message_id'] == state['_active_source_message_id']
