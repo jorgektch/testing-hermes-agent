@@ -57,22 +57,41 @@ def _db_path() -> str:
 
 
 def connect():
-    remote = os.environ.get('TURSO_DATABASE_URL', '').strip()
+    remote = os.environ.get("TURSO_DATABASE_URL", "").strip()
+
     if remote:
-        os.environ.get("TURSO_DATABASE_TURSO_AUTH_TOKEN", "").strip() or os.environ.get("TURSO_AUTH_TOKEN", "").strip()
+        token = os.environ.get("TURSO_AUTH_TOKEN", "").strip()
+
         if not token:
-            raise RuntimeError('TURSO_AUTH_TOKEN is required with TURSO_DATABASE_URL')
-        import libsql  # installed with backend/requirements.txt; never put token in the URL
-        con = libsql.connect(database=remote, auth_token=token)
+            raise RuntimeError(
+                "TURSO_AUTH_TOKEN is required with TURSO_DATABASE_URL"
+            )
+
+        import libsql
+
+        con = libsql.connect(
+            database=remote,
+            auth_token=token,
+        )
     else:
-        if os.getenv('VERCEL') or os.getenv('AWS_LAMBDA_FUNCTION_NAME'):
-            raise RuntimeError('Persistent database required: configure TURSO_DATABASE_URL and TURSO_AUTH_TOKEN on Vercel')
+        if os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME"):
+            raise RuntimeError(
+                "Persistent database required: configure Turso credentials"
+            )
+
         path = _db_path()
-        if path != ':memory:':
+
+        if path != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
-        con = sqlite3.connect(path, timeout=15, check_same_thread=False)
-        con.execute('PRAGMA busy_timeout = 15000')
-    con.execute('PRAGMA foreign_keys = ON')
+
+        con = sqlite3.connect(
+            path,
+            timeout=15,
+            check_same_thread=False,
+        )
+        con.execute("PRAGMA busy_timeout = 15000")
+
+    con.execute("PRAGMA foreign_keys = ON")
     return con
 
 
