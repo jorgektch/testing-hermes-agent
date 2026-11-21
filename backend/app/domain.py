@@ -520,6 +520,7 @@ def end_turn(state: dict, reply: str) -> None:
     state.pop('_search_out_of_budget_this_turn', None)
     state.pop('_search_nearest_out_of_budget_this_turn', None)
     state.pop('_automatic_search_recovery', None)
+    state.pop('_pref_updated_search_this_turn', None)
     # A simple explicit single-media offer can be accepted with "yes" next turn.
     # A combined "photos or visit?" question is ambiguous and never preauthorized.
     text = reply.lower()
