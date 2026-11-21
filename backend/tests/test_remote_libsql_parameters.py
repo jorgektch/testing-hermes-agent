@@ -82,7 +82,7 @@ def test_initialize_fixture_and_agent_booking_use_remote_compatible_bindings(tmp
     domain.end_turn(state, 'Booked in the simulation')
 
     # Fails in the original implementation because booking insertion used a dict.
-    db.save_turn(auth, lead['id'], 2, state, [], 'Yes, book that visit', 'Booked in the simulation')
+    db.save_turn(auth, lead['id'], 2, state, [], 'Yes, I confirm', 'Booked in the simulation')
     with db.database() as con:
         assert con.execute('SELECT COUNT(*) FROM meetings WHERE lead_id=?', (lead['id'],)).fetchone()[0] == 1
     db._INITIALIZED.discard(url)
