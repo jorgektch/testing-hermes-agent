@@ -78,6 +78,84 @@ def _record_sent_media(state: dict, message: str) -> None:
         saved.update(sent_docs)
         entry['document_urls_sent']=sorted(saved)
 
+
+def _verified_fact_reply(state: dict, plain: str) -> str | None:
+    """Repair an unanswered, single-property public fact without extra consent."""
+    from . import conversation_context
+    question=str(state.get('_active_source_message_text') or '')
+    topic=conversation_context.topic(question) or state.get('_pending_factual_topic_override')
+    original_question=state.get('_pending_factual_request_text') or question
+    if topic not in ('area','price','bedrooms','bathrooms','kitchen','backyard',
+                     'parking','location','availability'):
+        return None
+    resolution=state.get('_turn_property_resolution') or {}
+    facts=state.get('_details_for_current_turn') or {}
+    code=resolution.get('unit_id')
+    if (not code or resolution.get('ambiguous') or facts.get('unit_id')!=code):
+        return None
+    features=facts.get('confirmed_features') or {}
+    plausible={
+        'area':bool(re.search(r'\b(?:area|size|sq\.?\s*m|m2|sq\.?\s*ft|square feet)\b',plain,re.I)
+                    and any(str(v) in plain for v in
+                            (facts.get('area_sqm'),facts.get('lot_area_m2')))),
+        'price':str(facts['price_usd']) in plain.replace(',','') or
+                f'{int(facts["price_usd"])//1000}k' in plain.lower(),
+        'bedrooms':bool(re.search(r'\b(?:bedrooms?|beds?)\b',plain,re.I)
+                        and re.search(r'(?<![\w-])'+str(facts['bedrooms'])+r'(?!\d)',plain)),
+        'bathrooms':bool(re.search(r'\b(?:bathrooms?|baths?)\b',plain,re.I)
+                         and str(facts['bathrooms']) in plain),
+        'kitchen':bool(re.search(r'\bkitchen\b',plain,re.I)
+                        and str(features.get('kitchen_layout','')).lower() in plain.lower()),
+        'backyard':bool(re.search(r'\b(?:backyard|garden)\b',plain,re.I)),
+        'parking':bool(re.search(r'\b(?:parking|car space)\b',plain,re.I)
+                        and str(features.get('parking_spaces','')) in plain),
+        'location':bool(re.search(r'\blima\b',plain,re.I)
+                         and re.search(r'\b(?:city|reference|exact|fictional)\b',plain,re.I)),
+        'availability':bool(str(facts['available_from_date']).lower() in plain.lower() or
+                            (facts['available_from_date']=='Immediate' and
+                             'ready now' in plain.lower())),
+    }
+    stalled=bool(re.search(
+        r'\b(?:please confirm|confirm again|could you confirm|'
+        r'are you interested|system issue|unable to (?:access|retrieve|confirm)|'
+        r'would you like to proceed|still need to confirm)\b',plain,re.I))
+    needs_feet=(topic=='area' and bool(re.search(
+        r'\b(?:square footage|square feet|sq\.?\s*ft)\b',original_question,re.I)) and
+        not bool(re.search(r'\b(?:square feet|sq\.?\s*ft)\b',plain,re.I)))
+    if plausible.get(topic) and not stalled and not needs_feet:
+        return None
+    name=f'{facts["commercial_name"]} ({code})'
+    if topic=='area':
+        built=float(facts['area_sqm']); lot=float(facts['lot_area_m2'])
+        def unit(n):
+            return int(n) if n.is_integer() else n
+        return (f'{name}: built area {unit(built)} sq m '
+                f'({round(built*10.763910417):,} sq ft); lot area '
+                f'{unit(lot)} sq m ({round(lot*10.763910417):,} sq ft).')
+    if topic=='price':
+        return f'{name} is listed for USD {int(facts["price_usd"]):,} (synthetic).'
+    if topic=='bedrooms':
+        return f'{name} has {facts["bedrooms"]} bedrooms.'
+    if topic=='bathrooms':
+        return f'{name} has {facts["bathrooms"]} bathrooms.'
+    if topic=='kitchen':
+        return f'{name} has an {features.get("kitchen_layout","unspecified")} kitchen.'
+    if topic=='backyard':
+        return (f'{name} has a private backyard of {features.get("backyard_area_m2")} sq m.'
+                if features.get('private_backyard') else
+                f'{name} has no verified private backyard.')
+    if topic=='parking':
+        return f'{name} has {features.get("parking_spaces","unspecified")} parking space(s).'
+    if topic=='location':
+        city=(facts.get('location') or {}).get('city') or 'Lima'
+        return (f'{name} is listed in {city}, Peru (synthetic). '
+                'Its exact street address is not published.')
+    if topic=='availability':
+        when=facts['available_from_date']
+        return f'{name} is {"ready now" if when=="Immediate" else "available from "+when}.'
+    return None
+
+
 def validate_outbound(reply: str, state: dict) -> str:
     """Avoid duplicate intros, unsolicited/fictional URLs and catalog dumps.
 
@@ -114,6 +192,15 @@ def validate_outbound(reply: str, state: dict) -> str:
         just_selected=bool(re.search(r'\b\d{1,2}(?::00)?\s*(?:am|pm)\b',active_user_text,re.I))
         if false_claim or wrong_day or just_selected:
             return _pending_visit_recap(state)
+    repaired=_verified_fact_reply(state,plain)
+    if repaired is not None:
+        state['_fact_answer_repaired_this_turn']=True
+        return repaired
+    repeat_urls=set(state.get('_media_resend_urls_this_turn') or [])
+    if repeat_urls.intersection(_urls(plain)) and not re.search(
+            r'\b(?:resend|resending|again|previously shared|reenv[ií]o)\b',plain,re.I):
+        unit=(state.get('_turn_property_resolution') or {}).get('unit_id')
+        plain=f"I'm resending the requested material for {unit or 'this house'}: "+plain
     if search_results is not None:
         names={x.upper() for x in re.findall(r'\bH-\d+\b',plain,re.I)}
         matches={u['unit_id'] for u in search_results}

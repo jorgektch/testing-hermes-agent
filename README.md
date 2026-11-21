@@ -28,6 +28,73 @@ A **single-screen evaluation workspace** for [Nous Research Hermes Agent](https:
 - **Source of truth:** edit `shared/blackpenguin/{project,property_types,units,assets}.json`, run `python scripts/build_catalog_from_blackpenguin.py`, then `python scripts/generate_demo_assets.py` (requires `reportlab` installed). Do **not** manually edit generated `shared/catalog.json` or `backend/app/catalog.json`.
 - **Media:** `/properties/H-201/gallery` and equivalent URLs aggregate only the given unit's images. A PDF in a unit card is a synthetic *fact sheet*, not a licensed construction plan or project-level brochure. Retired apartment asset files are retained on disk only to avoid breaking previously shared historical links, but are not in the public catalog.
 
+## v12 — Contextual Sales Graph & Commercial Memory
+
+v12 fixes the **Nov 21 property-details confirmation loop**. The buyer asked for
+H-201's area, but Hermes repeatedly received rejected `get_unit_details`
+and `track_property_interest` results because the only presented option had
+not been promoted to conversational focus. A property question **never**
+requires interest declaration or appointment consent.
+
+### Conversational graph (not a mandatory linear funnel)
+
+```mermaid
+flowchart TD
+    A[Partial buyer preferences] <--> B[Search and compare]
+    B <--> C[Explore public property details and assets]
+    C <--> D[Propose a visit]
+    D <--> E[Explore visit dates and hours]
+    E --> F{Explicitly confirm?}
+    F -->|Yes| G[Atomic booking and advisor assignment]
+    F -->|Different time| E
+    F -->|Explore other options| B
+    G --> H[Manage, reschedule, cancel or follow up]
+    H --> B
+```
+
+**Independent source-of-truth dimensions:**
+
+- `conversation_focus` identifies the house being discussed. The
+  `last_presented_units` list preserves the ordering of options actually
+  sent, so "the second" can reference the right house. A sole recent option
+  resolves "it", "that property" and a follow-up "What is the area?".
+  Multiple recent options remain ambiguous until identified.
+- `search_preferences` stores revisable hard/soft budget and bedroom
+  criteria. `property_filters` adds incremental built-area, bathroom,
+  parking, open-kitchen and backyard filters, plus comparisons relative
+  to an identified house, without silently overwriting budget caps.
+- `answered_topics` and the BlackPenguin dialogue's
+  `memory.answered_topics` record **actually delivered** property facts,
+  keyed by property, topic and message evidence. `shared_media` records
+  verified links already sent, so follow-up requests can explicitly resend.
+- `visit_draft` is independent of exploration: asking about H-204 does not
+  transfer a pending H-201 visit. Booking confirmation and any reprogramming
+  still require explicit consent and transactional availability validation.
+- `conversation_phase` and `conversation_transitions` describe the
+  current *activity*, not an authorization gate. Buyers can return to
+  searches/details at any time.
+
+**Hermes remains the conversational tool agent.** Backend resolution
+does not infer buying intent. Catalog-backed read-only factual prefetch
+provides the verified facts in context. When Hermes misreads a clear
+public question as needing confirmation, the outbound policy repairs
+only that fact from the approved catalog. Unknown/ambiguous references
+must be clarified, never guessed. Repeated rejected tool calls are
+cached within the current turn with an actionable reason.
+
+### Review and regression
+
+- `backend/tests/test_v12_contextual_sales_graph.py`: 17 new
+  anonymized cases covering the original error, property switching,
+  ordinal references, all-at-once filters, relative comparisons,
+  delivered-topic memory, media resend and booking separation.
+- GitHub Actions validates Python syntax, all backend tests and the
+  Next.js build; additionally check Hermes/OpenRouter/Turso behavior in
+  Preview with **fictional leads**. Backend tests do not constitute
+  a live LLM evaluation.
+- The synthetic property catalog and exact booking consent rules remain
+  authoritative. No real houses, appointments or physical addresses.
+
 ## v11 — Dynamic Sales Preferences & Reliable Booking (review branch)
 
 - Buyer criteria are revisable: search_preferences stores a budget floor, cap,

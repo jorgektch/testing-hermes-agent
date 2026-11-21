@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 from datetime import timezone
-from . import scheduling, sales_preferences
+from . import scheduling, sales_preferences, conversation_context, property_filters
 
 PROJECT_TZ = ZoneInfo('America/Lima')
 VISIT_MINUTES = 45
@@ -93,9 +93,16 @@ def blank_state() -> dict:
         'shared_media': {},
         'search_preferences': sales_preferences.empty(),
         'search_preferences_history': [],
+        'property_filters': property_filters.empty(),
+        'property_filters_history': [],
         'booked_visits': [],
         'booking_proposal': None,
         'property_interests': [],
+        'last_presented_units': [],
+        'last_assistant_reply': None,
+        'conversation_phase': 'discovery',
+        'answered_topics': [],
+        'conversation_transitions': [],
         'ui_fact_evidence': {},
         'tool_observations': [],
         'events': [],
@@ -170,6 +177,12 @@ def update_search_preferences(state: dict, **kwargs) -> dict:
             'source_message_id':state.get('_active_source_message_id'),
             'evidence':message,'captured_at':now_local().isoformat(),
             'source':'active_conversation'}
+    if 'budget' in result['changed_fields'] and state.get('property_filters'):
+        # An explicit new budget replaces older relative-price exploration;
+        # the current message may establish a fresh comparison afterward.
+        property_filters.update(state,{
+            'relative_price_lt':None,'relative_price_gt':None,
+            'source_unit_id':None},state.get('_active_source_message_id'))
     if 'bedrooms' in result['changed_fields']:
         b=prefs['bedrooms']
         facts['bedrooms']=next(n for n in (b['preferred'],b['minimum'],b['maximum']) if n is not None)
@@ -270,47 +283,72 @@ def _set_visit_unit(state: dict, code: str) -> None:
 
 
 def _observe_inbound_context(state: dict, message: str) -> None:
-    """Track explicitly discussed houses; never treat a question as booking consent."""
-    known = _units_by_code()
-    mentioned = list(dict.fromkeys(code.upper() for code in re.findall(
-        r'(?<![A-Z0-9])H-\d{3}(?![A-Z0-9])', message.upper()) if code.upper() in known))
-    focus = _focus(state)
-    if len(mentioned) == 1:
-        _set_focus(state, mentioned[0])
-    elif len(mentioned) > 1:
-        focus['ambiguous'] = True
-        state['bp_episode']['sales_dialogue_states']['state_json']['conversation_focus'] = copy.deepcopy(focus)
-    visit_intent = bool(re.search(
-        r'\b(?:visit|tour|book|schedule|appointment|slots|visit times|which hours|what times|see in person|view in person|see\s+H-\d{3}|view\s+H-\d{3})\b',
-        message, flags=re.I))
-    negated = bool(re.search(r"\b(?:don['’]?t|do not|not|cancel|without)\s+"
-                             r"(?:want to )?(?:visit|tour|book|schedule)\b", message, flags=re.I))
-    affirmative = bool(re.fullmatch(
+    """Resolve topic references without treating exploration as booking consent.
+
+    The buyer can ask for public details of the sole H-201 we just recommended,
+    without ever saying "H-201" or declaring interest. Booking is independent.
+    """
+    known=_units_by_code()
+    resolution=conversation_context.resolved_reference(state,message,known)
+    state['_turn_property_resolution']=resolution
+    named=conversation_context.mentioned_codes(message,known)
+    discussed=bool(conversation_context.is_detail_question(message))
+    exploration_yes=conversation_context.is_property_confirmation(
+        message,str(state.get('last_assistant_reply') or ''))
+    visit_intent=bool(re.search(
+        r'\b(?:visit|tour|book|schedule|appointment|slots|visit times|'
+        r'which hours|what times|see in person|view in person|'
+        r'see\s+H-\d{3}|view\s+H-\d{3})\b',message,re.I))
+    negated=bool(re.search(
+        r"\b(?:don['’]?t|do not|not|cancel|without)\s+(?:want to )?"
+        r"(?:visit|tour|book|schedule)\b",message,re.I))
+    interest_declared=bool(re.search(
+        r'\b(?:i(?: am|m|\'m)? interested|i (?:want|like|prefer|choose|pick) '
+        r'(?:that|this|the) (?:house|one|property)|i prefer that one)\b',
+        message,re.I))
+    affirmative_only=bool(re.fullmatch(
+        r'\s*(?:yes|yes please|sure|certainly|of course)[.!]?\s*',
+        message,re.I))
+    pending_booking=bool(state.get('confirmation_request'))
+    should_focus=(len(named)==1 or
+                  (affirmative_only and not pending_booking and
+                   resolution.get('unit_id') and not resolution.get('ambiguous')) or
+                  (resolution.get('unit_id') and (
+                      discussed or exploration_yes or interest_declared or
+                      visit_intent or resolution.get('reason') in ('ordinal','comparative'))))
+    if should_focus and resolution.get('unit_id'):
+        _set_focus(state,resolution['unit_id'])
+        state['conversation_phase']='property_details' if discussed or exploration_yes else state.get('conversation_phase','discovery')
+        if exploration_yes or interest_declared:
+            state['stage']='Exploring property details'
+    elif resolution.get('ambiguous') and (discussed or exploration_yes or visit_intent):
+        state['_turn_property_ambiguous']=True
+    offer=state.pop('pending_visit_offer',None)
+    affirmative=bool(re.fullmatch(
         r'\s*(?:yes|yes please|sure|please do|that works|sounds good|ok|okay)[.!]?\s*',
-        message, flags=re.I))
-    offer = state.pop('pending_visit_offer', None)
-    if affirmative and offer and not mentioned and offer.get('unit_id') in known:
-        _set_visit_unit(state, offer['unit_id'])
+        message,re.I))
+    if (affirmative and offer and not named and
+            offer.get('unit_id') in known):
+        _set_visit_unit(state,offer['unit_id'])
+        state['conversation_phase']='visit_planning'
         return
-    existing_visit_reference = bool(re.search(
+    existing_visit_reference=bool(re.search(
         r'\b(?:confirm|go ahead|proceed|finalize|reschedule|cancel)\b|'
         r'\b(?:my|our|the)\s+appointment\b|\bthe visit we discussed\b',
-        message, flags=re.I))
-    if existing_visit_reference and not mentioned and _draft(state).get('unit_id'):
+        message,re.I))
+    if existing_visit_reference and not named and _draft(state).get('unit_id'):
         return
-    active=next((b for b in state.get('booked_visits',[]) if b.get('status')=='confirmed'),None)
+    active=next((b for b in state.get('booked_visits',[])
+                 if b.get('status')=='confirmed'),None)
     if active and re.search(
         r'\b(?:reschedule|change|move|postpone|switch)\b.*'
         r'\b(?:visit|appointment|date|day|time)\b',message,re.I):
         draft=_draft(state)
         draft['action']='reschedule'
         draft['original_meeting_id']=active['meeting_id']
-    if visit_intent and not negated:
-        target = mentioned[0] if len(mentioned) == 1 else (
-            focus.get('unit_id') if not mentioned and not focus.get('ambiguous') else None)
-        if target:
-            _set_visit_unit(state, target)
-
+    if visit_intent and not negated and resolution.get('unit_id') and not resolution.get('ambiguous'):
+        _set_visit_unit(state,resolution['unit_id'])
+        state['conversation_phase']='visit_planning'
 
 def _slot_error(code: str, message: str, unit_id: str | None = None,
                 *, next_action: str, **details) -> dict:
@@ -358,6 +396,7 @@ def begin_turn(state: dict, message: str) -> None:
     mid = str(uuid.uuid4())
     state['_active_source_message_id'] = mid
     state['_active_source_message_text'] = message
+    state['_last_inbound_topic']=conversation_context.topic(message)
     _observe_inbound_context(state, message)
     bp['sales_messages'].append({
         'id': mid, 'conversation_id': bp['ids']['conversation_id'],
@@ -372,6 +411,54 @@ def begin_turn(state: dict, message: str) -> None:
     bp['leads']['funnel_stage'] = 'contacted' if not state['booked_visits'] else 'appointment_set'
 
 
+
+def _remember_answered_topics(state: dict, reply: str) -> None:
+    """Record information actually delivered, not merely fetched by a tool."""
+    topic=state.get('_last_inbound_topic') or state.get('_pending_factual_topic_override')
+    resolution=state.get('_turn_property_resolution') or {}
+    unit_id=resolution.get('unit_id') or _focus(state).get('unit_id')
+    details=state.get('_details_for_current_turn') or {}
+    if (topic in ('area','bathrooms','bedrooms','kitchen','parking','backyard',
+                  'price','location','availability') and
+            unit_id in _units_by_code() and
+            details.get('unit_id')==unit_id and not resolution.get('ambiguous')):
+        unit=_units_by_code()[unit_id]
+        expected={
+            'area':[str(unit.get('area_sqm')),str(unit.get('lot_area_m2'))],
+            'bathrooms':[str(unit.get('bathrooms'))],
+            'bedrooms':[str(unit.get('bedrooms'))],
+            'price':[str(unit.get('price_usd')),f"{int(unit.get('price_usd')):,}"],
+            'parking':[str(unit.get('confirmed_features',{}).get('parking_spaces'))],
+            'backyard':[str(unit.get('confirmed_features',{}).get('backyard_area_m2'))],
+            'kitchen':[str(unit.get('confirmed_features',{}).get('kitchen_layout'))],
+            'location':[str((unit.get('location') or {}).get('city'))],
+            'availability':[str(unit.get('available_from_date'))],
+        }.get(topic,[])
+        if any(x and x!='None' and x.lower() in reply.lower() for x in expected):
+            record_={'unit_id':unit_id,'topic':topic,
+                     'source_message_id':state.get('_active_source_message_id'),
+                     'reply_message_id':state['bp_episode']['sales_messages'][-1]['id'],
+                     'recorded_at':now_local().isoformat()}
+            items=state.setdefault('answered_topics',[])
+            items.append(record_)
+            state['answered_topics']=items[-80:]
+    dialogue=state['bp_episode']['sales_dialogue_states']['state_json']
+    memory=dialogue.setdefault('memory',{})
+    memory['answered_topics']=copy.deepcopy(state.get('answered_topics',[])[-40:])
+    memory['recent_turns']=(memory.get('recent_turns',[])+[{
+        'inbound_id':state.get('_active_source_message_id'),
+        'inbound_topic':topic,'unit_id':unit_id,
+        'assistant_reply_id':state['bp_episode']['sales_messages'][-1]['id'],
+        'phase':state.get('conversation_phase'),
+    }])[-12:]
+    memory['as_of_message_id']=state['bp_episode']['sales_messages'][-1]['id']
+    state['conversation_transitions']=(state.get('conversation_transitions',[])+[{
+        'message_id':state.get('_active_source_message_id'),
+        'unit_id':unit_id,'phase':state.get('conversation_phase'),
+        'topic':topic,
+    }])[-35:]
+
+
 def end_turn(state: dict, reply: str) -> None:
     """Record the assistant response and remove transient source text."""
     bp = state['bp_episode']
@@ -383,6 +470,11 @@ def end_turn(state: dict, reply: str) -> None:
         'created_at': datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z'),
     })
     bp['sales_conversations']['continuity_json']['waiting_for_lead'] = True
+    _remember_answered_topics(state, reply)
+    new_mentions=conversation_context.presented_units(reply,_units_by_code())
+    if new_mentions:
+        state['last_presented_units']=new_mentions
+    state['last_assistant_reply']=reply
     state.pop('_active_source_message_id', None)
     state.pop('_active_source_message_text', None)
     # A simple explicit single-media offer can be accepted with "yes" next turn.
@@ -398,8 +490,16 @@ def end_turn(state: dict, reply: str) -> None:
     else:
         state['pending_media_offer'] = None
     state.pop('_approved_media_urls_this_turn', None)
+    state.pop('_media_resend_urls_this_turn', None)
+    state.pop('_tool_rejection_cache', None)
+    state.pop('_turn_property_ambiguous', None)
+    state.pop('_turn_property_resolution', None)
+    state.pop('_fact_answer_repaired_this_turn', None)
     state.pop('_matching_options_this_turn', None)
     state.pop('_details_for_current_turn', None)
+    state.pop('_last_inbound_topic', None)
+    state.pop('_pending_factual_topic_override', None)
+    state.pop('_pending_fact_hint', None)
     state.pop('_slot_queries_this_turn', None)
     state.pop('_booking_completion_error', None)
     state.pop('_allowed_alternative_units_this_turn', None)
@@ -599,6 +699,7 @@ def evaluate_properties(state: dict, max_budget_usd: int | None = None,
     if chosen_type == 'invalid':
         return {'error':'Preferred property type must be House, Apartment or Either.'}
     features = required_features or {}
+    refinements=state.get('property_filters') or property_filters.empty()
     if not isinstance(features, dict):
         return {'error':'Required features must be a JSON object.'}
     allowed_features = {'kitchen_layout','private_backyard','backyard_area_m2',
@@ -622,6 +723,7 @@ def evaluate_properties(state: dict, max_budget_usd: int | None = None,
         unit=copy.deepcopy(raw)
         unit['ready_by_purchase_deadline']=None if deadline is None else ready_date(unit)<=deadline
         eligible, violations, deviations=sales_preferences.filter_unit(unit,prefs)
+        violations.extend(property_filters.matches(unit,refinements))
         if chosen_type and unit['property_type']!=chosen_type:
             violations.append('Different property category')
         if any(
@@ -668,7 +770,9 @@ def evaluate_properties(state: dict, max_budget_usd: int | None = None,
     spoken=str(state.get('_active_source_message_text') or '')
     alternatives_requested=bool(re.search(
         r'\b(?:alternative|alternatives|other options|other houses|anything else|'
-        r'what else|more options|more bedrooms|flexible|similar houses)\b',
+        r'what else|more options|more bedrooms|fewer bedrooms|less bedrooms|'
+        r'more area|larger|bigger|smaller|cheaper|less expensive|more expensive|'
+        r'higher price|lower price|flexible|similar houses)\b',
         spoken, flags=re.I))
     # Unless explicitly requested, deviations are not sold as matches.
     optional=[compact(u) for u in alternatives[:3]] if alternatives_requested else []
@@ -679,6 +783,7 @@ def evaluate_properties(state: dict, max_budget_usd: int | None = None,
         'applied_criteria':{
             'budget':prefs['budget'],'bedrooms':prefs['bedrooms'],
             'preferred_property_type':chosen_type or 'Either',
+            'property_filters':copy.deepcopy(refinements),
             'transaction_type':'sale',
         },
         'matching_properties':[compact(u) for u in primary],
@@ -691,10 +796,59 @@ def evaluate_properties(state: dict, max_budget_usd: int | None = None,
                        'alternative as OPTIONAL and explain the specific difference. '
                        'Do not bring up an alternative without a request; '
                        'do not push booking before answering the buyer.'),
-        'note':'Buyer budget ceilings and exact bedroom constraints are authoritative. '
+        'note':'Buyer budget ceilings, comparative criteria and exact bedroom constraints are authoritative. '
                'Soft bedroom differences are labeled alternatives, NEVER matches. '
                'Inventory, prices and advisors are fictional.'
     }
+
+
+
+def compare_properties(state: dict, unit_ids: list[str] | None = None) -> dict:
+    """Read-only grounded comparison; never selects a house or books a visit."""
+    known=_units_by_code()
+    spoken=str(state.get('_active_source_message_text') or '')
+    named=conversation_context.mentioned_codes(spoken,known)
+    requested=unit_ids or (named if len(named)>=2 else [])
+    if not requested and re.search(
+            r'\b(?:compare|difference|between|both|those two|these two)\b',
+            spoken,re.I):
+        requested=state.get('last_presented_units') or []
+    requested=list(dict.fromkeys(requested))
+    if not 2<=len(requested)<=3 or any(c not in known for c in requested):
+        return {'error':'Specify two or three published houses to compare.',
+                'error_code':'COMPARISON_NEEDS_HOUSES',
+                'next_action':'Use two named houses or the last two offered options.'}
+    if state.get('_active_source_message_id') and not (
+            all(code in named for code in requested) or
+            (set(requested).issubset(set(state.get('last_presented_units') or [])) and
+             re.search(r'\b(?:compare|difference|between|both|those two|these two)\b',
+                       spoken,re.I))):
+        return {'error':'Comparison inputs must be grounded in this conversation.',
+                'error_code':'COMPARISON_NOT_GROUNDED',
+                'next_action':'Use houses named or recently offered to the buyer.'}
+    entries=[]
+    for code in requested:
+        u=known[code]
+        entries.append({
+            'unit_id':code,'name':u['commercial_name'],
+            'price_usd':u['price_usd'],'bedrooms':u['bedrooms'],
+            'bathrooms':u['bathrooms'],'built_area_sqm':u['area_sqm'],
+            'lot_area_sqm':u['lot_area_m2'],
+            'confirmed_features':u.get('confirmed_features') or {},
+            'availability':u['available_from_date'],
+        })
+    first=entries[0]
+    differences={x['unit_id']:{
+        'price_usd_vs_first':x['price_usd']-first['price_usd'],
+        'built_area_sqm_vs_first':x['built_area_sqm']-first['built_area_sqm'],
+        'bedrooms_vs_first':x['bedrooms']-first['bedrooms']
+    } for x in entries[1:]}
+    state['conversation_phase']='comparison'
+    record(state,'comparison','Compared '+', '.join(requested))
+    return {'ok':True,'properties':entries,'relative_to':first['unit_id'],
+            'differences':differences,'selected_unit_id':None,
+            'note':'Public comparison only. No unit selected for a visit.'}
+
 
 
 def _buyer_mentioned_house(state: dict, unit_id: str) -> bool:
@@ -712,22 +866,41 @@ def _buyer_mentioned_house(state: dict, unit_id: str) -> bool:
     return False
 
 
-def unit_details(state: dict, unit_id: str) -> dict:
+def unit_details(state: dict, unit_id: str | None = None) -> dict:
     """Expose verified details for ONE requested house, never all catalog units.
 
     The current buyer turn must name that house, or it must already be the
     conversational focus. Matching a search result alone is not buyer interest.
     """
+    resolution=state.get('_turn_property_resolution') or {}
+    if unit_id is None:
+        unit_id=resolution.get('unit_id') or (
+            _focus(state).get('unit_id') if not state.get('_active_source_message_id') else None)
     unit = next((u for u in read_catalog()['properties']
                  if u['unit_id'].casefold() == str(unit_id).strip().casefold()), None)
     if unit is None:
-        return {'error': 'Unknown or unpublished house.'}
-    focused = state.get('exploring_unit_id') == unit['unit_id']
-    selected = state['lead'].get('interest_unit_id') == unit['unit_id']
-    if state.get('_active_source_message_id') and not _buyer_mentioned_house(state, unit['unit_id']) and not (focused or selected):
-        return {'error': 'Ask which house the buyer wants to explore before loading details.'}
+        return {'error':'No single published house can be identified.',
+                'error_code':'REFERENCE_UNRESOLVED',
+                'candidates':resolution.get('candidates',[]),
+                'next_action':'Ask for a property only when the current options are ambiguous.'}
+    resolution=state.get('_turn_property_resolution') or {}
+    # Public factual reads require an unambiguous conversational reference,
+    # never a buying-interest declaration or an appointment commitment.
+    if state.get('_active_source_message_id'):
+        if resolution.get('ambiguous'):
+            return {'error':'More than one property could match this question.',
+                    'error_code':'REFERENCE_AMBIGUOUS',
+                    'candidates':resolution.get('candidates',[]),
+                    'next_action':'Ask which one only if it is genuinely ambiguous.'}
+        if resolution.get('unit_id')!=unit['unit_id']:
+            return {'error':'The requested details do not match the discussed property.',
+                    'error_code':'PROPERTY_NOT_IN_CONTEXT',
+                    'resolved_unit_id':resolution.get('unit_id'),
+                    'next_action':'Use resolved_unit_id if present; do not ask the buyer to reconfirm it.'}
     _set_focus(state, unit['unit_id'])
+    state['conversation_phase']='property_details'
     return {'ok': True, 'unit_id': unit['unit_id'],
+            'reference_resolution': state.get('_turn_property_resolution'),
             'commercial_name': unit['commercial_name'],
             'property_type': unit['property_type'],
             'bedrooms': unit['bedrooms'], 'bathrooms': unit['bathrooms'],
@@ -768,14 +941,22 @@ def unit_media(unit_id: str) -> dict:
 
 
 
-def list_unit_assets(state: dict, unit_id: str) -> dict:
+def list_unit_assets(state: dict, unit_id: str | None = None) -> dict:
     """Read approved media availability without authorizing any URLs to send."""
+    if not unit_id:
+        unit_id=(state.get('_turn_property_resolution') or {}).get('unit_id')
     unit = _units_by_code().get(unit_id)
     if not unit:
-        return {'error':'Unknown or unpublished house.'}
+        return {'error':'The referenced house is not available.',
+                'error_code':'REFERENCE_UNRESOLVED',
+                'next_action':'Ask which property only if no unique contextual reference exists.'}
+    reference=state.get('_turn_property_resolution') or {}
     if state.get('_active_source_message_id') and (
-        unit_id!=_focus(state).get('unit_id') and not _buyer_mentioned_house(state,unit_id)):
-        return {'error':'Ask which property the buyer is referring to.'}
+            reference.get('ambiguous') or reference.get('unit_id')!=unit_id):
+        return {'error':'The requested resources do not match an unambiguous property.',
+                'error_code':'PROPERTY_NOT_IN_CONTEXT',
+                'resolved_unit_id':reference.get('unit_id'),
+                'next_action':'Resolve the current property from conversation context.'}
     media=unit_media(unit_id)
     if media.get('error'):
         return media
@@ -1097,11 +1278,14 @@ def track_property_interest(state: dict, unit_id: str, status: str = 'discussed'
         return {'error': 'Unknown or non-public residential unit.'}
     if status not in ('discussed', 'considering', 'interested'):
         return {'error': 'Invalid interest status.'}
-    if state.get('_active_source_message_id') and not _buyer_mentioned_house(state, unit_id):
-        if state.get('exploring_unit_id') != unit_id and state['lead'].get('interest_unit_id') != unit_id:
-            return {'error': 'The lead has not referred to that house.'}
+    reference=state.get('_turn_property_resolution') or {}
+    if state.get('_active_source_message_id') and (
+            reference.get('ambiguous') or reference.get('unit_id')!=unit_id):
+        return {'error':'Cannot record interest without the correctly resolved house.',
+                'error_code':'PROPERTY_NOT_IN_CONTEXT',
+                'resolved_unit_id':reference.get('unit_id'),
+                'next_action':'Use resolved_unit_id; do not ask the buyer to repeat the house code.'}
     if status == 'interested' and state.get('_active_source_message_id'):
-        import re
         words = str(state.get('_active_source_message_text') or '').lower()
         # Merely asking for information or photos is NOT visit intent.
         visit_intent = re.search(r'\b(visit|tour|book|schedule|see in person|appointment|choose|select|pick|want|interested|like|prefer)\b', words)
@@ -1335,6 +1519,40 @@ def verify_explicit_preferences(state: dict, message: str) -> dict:
                 'fields':result['changed_fields'],
                 'message_id':state.get('_active_source_message_id'),
                 'timestamp':now_local().isoformat()})
+    # Incremental filters can be collected in any order, or together in one
+    # message, without forcing the buyer to restart discovery.
+    ref=state.get('_turn_property_resolution') or {}
+    base=_units_by_code().get(ref.get('unit_id')) if not ref.get('ambiguous') else None
+    refinements=property_filters.parse(message,base)
+    bedroom_min=refinements.pop('_bedrooms_minimum',None)
+    bedroom_max=refinements.pop('_bedrooms_maximum',None)
+    if bedroom_min is not None or bedroom_max is not None:
+        b={'mode':'minimum','minimum':bedroom_min} if bedroom_min is not None else {
+            'mode':'maximum','maximum':bedroom_max}
+        result=sales_preferences.apply(state,{'bedrooms':b},
+            source_message_id=state.get('_active_source_message_id'))
+        if result.get('error'):
+            return result
+        if result.get('changed_fields'):
+            state.setdefault('tool_observations',[]).append({
+                'tool':'relative_bedroom_refinement','status':'applied',
+                'fields':result['changed_fields'],
+                'message_id':state.get('_active_source_message_id'),
+                'timestamp':now_local().isoformat()})
+    if refinements:
+        change=property_filters.update(
+            state,refinements,state.get('_active_source_message_id'))
+        if change.get('error'):
+            return change
+        if change.get('changed_fields'):
+            state['conversation_phase']='search'
+            state.setdefault('tool_observations',[]).append({
+                'tool':'property_filter_refinement','status':'applied',
+                'fields':change['changed_fields'],
+                'message_id':state.get('_active_source_message_id'),
+                'timestamp':now_local().isoformat()})
+            record(state,'property_filters_updated',
+                   'Refined '+', '.join(change['changed_fields']))
     state['tool_observations']=state.get('tool_observations',[])[-50:]
     return response
 
@@ -1605,6 +1823,7 @@ def profile_snapshot(state: dict) -> dict:
     return {
         'lead': dict(state.get('lead') or {}),
         'search_preferences': copy.deepcopy(_preferences(state)),
+        'property_filters':copy.deepcopy(state.get('property_filters') or property_filters.empty()),
         'recent_preferences_changes': copy.deepcopy(state.get('search_preferences_history', [])[-3:]),
         'confirmation_request': copy.deepcopy(state.get('confirmation_request')),
         'last_offered_date': state.get('last_offered_date'),
@@ -1613,6 +1832,9 @@ def profile_snapshot(state: dict) -> dict:
         'conversation_focus': copy.deepcopy(_focus(state)),
         'visit_draft': copy.deepcopy(_draft(state)),
         'last_slot_search': copy.deepcopy(state.get('last_slot_search')),
+        'conversation_phase':state.get('conversation_phase','discovery'),
+        'last_presented_units':list(state.get('last_presented_units') or []),
+        'answered_topics':copy.deepcopy(state.get('answered_topics',[])[-12:]),
         'property_interests': list(state.get('property_interests') or []),
         'ui_fact_evidence': dict(state.get('ui_fact_evidence') or {}),
         'facts': {k: dict(v) for k,v in facts.items()},
