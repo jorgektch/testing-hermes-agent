@@ -53,6 +53,10 @@ def parse(text: str, reference: dict | None = None) -> dict[str, Any]:
     if re.search(r'\b(?:with|want|need|looking for|prefer|require)\s+(?:a\s+)?(?:private\s+)?(?:backyard|garden)\b',t):
         changes['private_backyard']=True
 
+    # A direct question about an identified house is not a request to
+    # revise the buyer's search filters.
+    if reference and re.search(r'\b(?:does|is|has|how)\s+H-\d{3}\b',t,re.I) and '?' in t:
+        reference=None
     if reference:
         # "What is the area?" is NOT a larger-area search. The comparative
         # must indicate a search/change, not a property-information question.
