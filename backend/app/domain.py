@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 from datetime import timezone
-from . import scheduling, sales_preferences, conversation_context
+from . import scheduling, sales_preferences, conversation_context, property_filters
 
 PROJECT_TZ = ZoneInfo('America/Lima')
 VISIT_MINUTES = 45
@@ -93,6 +93,8 @@ def blank_state() -> dict:
         'shared_media': {},
         'search_preferences': sales_preferences.empty(),
         'search_preferences_history': [],
+        'property_filters': property_filters.empty(),
+        'property_filters_history': [],
         'booked_visits': [],
         'booking_proposal': None,
         'property_interests': [],
@@ -175,6 +177,12 @@ def update_search_preferences(state: dict, **kwargs) -> dict:
             'source_message_id':state.get('_active_source_message_id'),
             'evidence':message,'captured_at':now_local().isoformat(),
             'source':'active_conversation'}
+    if 'budget' in result['changed_fields'] and state.get('property_filters'):
+        # An explicit new budget replaces older relative-price exploration;
+        # the current message may establish a fresh comparison afterward.
+        property_filters.update(state,{
+            'relative_price_lt':None,'relative_price_gt':None,
+            'source_unit_id':None},state.get('_active_source_message_id'))
     if 'bedrooms' in result['changed_fields']:
         b=prefs['bedrooms']
         facts['bedrooms']=next(n for n in (b['preferred'],b['minimum'],b['maximum']) if n is not None)
@@ -677,6 +685,7 @@ def evaluate_properties(state: dict, max_budget_usd: int | None = None,
     if chosen_type == 'invalid':
         return {'error':'Preferred property type must be House, Apartment or Either.'}
     features = required_features or {}
+    refinements=state.get('property_filters') or property_filters.empty()
     if not isinstance(features, dict):
         return {'error':'Required features must be a JSON object.'}
     allowed_features = {'kitchen_layout','private_backyard','backyard_area_m2',
@@ -700,6 +709,7 @@ def evaluate_properties(state: dict, max_budget_usd: int | None = None,
         unit=copy.deepcopy(raw)
         unit['ready_by_purchase_deadline']=None if deadline is None else ready_date(unit)<=deadline
         eligible, violations, deviations=sales_preferences.filter_unit(unit,prefs)
+        violations.extend(property_filters.matches(unit,refinements))
         if chosen_type and unit['property_type']!=chosen_type:
             violations.append('Different property category')
         if any(
@@ -746,7 +756,9 @@ def evaluate_properties(state: dict, max_budget_usd: int | None = None,
     spoken=str(state.get('_active_source_message_text') or '')
     alternatives_requested=bool(re.search(
         r'\b(?:alternative|alternatives|other options|other houses|anything else|'
-        r'what else|more options|more bedrooms|flexible|similar houses)\b',
+        r'what else|more options|more bedrooms|fewer bedrooms|less bedrooms|'
+        r'more area|larger|bigger|smaller|cheaper|less expensive|more expensive|'
+        r'higher price|lower price|flexible|similar houses)\b',
         spoken, flags=re.I))
     # Unless explicitly requested, deviations are not sold as matches.
     optional=[compact(u) for u in alternatives[:3]] if alternatives_requested else []
@@ -757,6 +769,7 @@ def evaluate_properties(state: dict, max_budget_usd: int | None = None,
         'applied_criteria':{
             'budget':prefs['budget'],'bedrooms':prefs['bedrooms'],
             'preferred_property_type':chosen_type or 'Either',
+            'property_filters':copy.deepcopy(refinements),
             'transaction_type':'sale',
         },
         'matching_properties':[compact(u) for u in primary],
@@ -769,7 +782,7 @@ def evaluate_properties(state: dict, max_budget_usd: int | None = None,
                        'alternative as OPTIONAL and explain the specific difference. '
                        'Do not bring up an alternative without a request; '
                        'do not push booking before answering the buyer.'),
-        'note':'Buyer budget ceilings and exact bedroom constraints are authoritative. '
+        'note':'Buyer budget ceilings, comparative criteria and exact bedroom constraints are authoritative. '
                'Soft bedroom differences are labeled alternatives, NEVER matches. '
                'Inventory, prices and advisors are fictional.'
     }
@@ -1432,6 +1445,40 @@ def verify_explicit_preferences(state: dict, message: str) -> dict:
                 'fields':result['changed_fields'],
                 'message_id':state.get('_active_source_message_id'),
                 'timestamp':now_local().isoformat()})
+    # Incremental filters can be collected in any order, or together in one
+    # message, without forcing the buyer to restart discovery.
+    ref=state.get('_turn_property_resolution') or {}
+    base=_units_by_code().get(ref.get('unit_id')) if not ref.get('ambiguous') else None
+    refinements=property_filters.parse(message,base)
+    bedroom_min=refinements.pop('_bedrooms_minimum',None)
+    bedroom_max=refinements.pop('_bedrooms_maximum',None)
+    if bedroom_min is not None or bedroom_max is not None:
+        b={'mode':'minimum','minimum':bedroom_min} if bedroom_min is not None else {
+            'mode':'maximum','maximum':bedroom_max}
+        result=sales_preferences.apply(state,{'bedrooms':b},
+            source_message_id=state.get('_active_source_message_id'))
+        if result.get('error'):
+            return result
+        if result.get('changed_fields'):
+            state.setdefault('tool_observations',[]).append({
+                'tool':'relative_bedroom_refinement','status':'applied',
+                'fields':result['changed_fields'],
+                'message_id':state.get('_active_source_message_id'),
+                'timestamp':now_local().isoformat()})
+    if refinements:
+        change=property_filters.update(
+            state,refinements,state.get('_active_source_message_id'))
+        if change.get('error'):
+            return change
+        if change.get('changed_fields'):
+            state['conversation_phase']='search'
+            state.setdefault('tool_observations',[]).append({
+                'tool':'property_filter_refinement','status':'applied',
+                'fields':change['changed_fields'],
+                'message_id':state.get('_active_source_message_id'),
+                'timestamp':now_local().isoformat()})
+            record(state,'property_filters_updated',
+                   'Refined '+', '.join(change['changed_fields']))
     state['tool_observations']=state.get('tool_observations',[])[-50:]
     return response
 
@@ -1702,6 +1749,7 @@ def profile_snapshot(state: dict) -> dict:
     return {
         'lead': dict(state.get('lead') or {}),
         'search_preferences': copy.deepcopy(_preferences(state)),
+        'property_filters':copy.deepcopy(state.get('property_filters') or property_filters.empty()),
         'recent_preferences_changes': copy.deepcopy(state.get('search_preferences_history', [])[-3:]),
         'confirmation_request': copy.deepcopy(state.get('confirmation_request')),
         'last_offered_date': state.get('last_offered_date'),
