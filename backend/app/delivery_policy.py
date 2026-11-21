@@ -150,7 +150,7 @@ def _verified_fact_reply(state: dict, plain: str) -> str | None:
     question=str(state.get('_active_source_message_text') or '')
     # A price mention inside an alternative search is NOT a question about
     # the previously discussed property's price.
-    if state.get('_turn_intent') in ('property_search','property_comparison'):
+    if state.get('_turn_intent') in ('property_search','property_comparison','preference_update'):
         return None
     topic=conversation_context.topic(question) or state.get('_pending_factual_topic_override')
     original_question=state.get('_pending_factual_request_text') or question
@@ -286,9 +286,11 @@ def validate_outbound(reply: str, state: dict) -> str:
     allowed = set(state.get('_approved_media_urls_this_turn') or [])
     unauthorised = [url for url in _urls(plain) if url not in allowed]
     search_results = state.get('_matching_options_this_turn')
+    commercial_search=state.get('_turn_intent') in ('property_search','preference_update')
     if unauthorised:
         if search_results is not None:
-            return _matching_reply(search_results)
+            return (_no_matches_for_state(state) if not search_results
+                    else _matching_reply(search_results))
         # Do not turn a bad link into a plausible but unverifiable address.
         raise ValueError('Hermes returned a URL not authorized by the domain media tool.')
     # The language model cannot promote a selected hour to a confirmed visit.
@@ -299,7 +301,7 @@ def validate_outbound(reply: str, state: dict) -> str:
                 state['_booking_completion_error'] +
                 ' Your existing appointment, if any, is unchanged. Can I check another time?')
     if (draft.get('status')=='awaiting_confirmation' and
-            state.get('_turn_intent') not in ('property_search','property_comparison')):
+            state.get('_turn_intent') not in ('property_search','property_comparison','preference_update')):
         false_claim=bool(re.search(
             r"\b(?:is confirmed|has been confirmed|i(?:'ve| have) (?:booked|scheduled)|"
             r"your visit is booked|your booking is confirmed)\b",plain,re.I))
@@ -311,7 +313,7 @@ def validate_outbound(reply: str, state: dict) -> str:
     # A missing/incorrect Hermes search-tool call must not return the price
     # of the *previously* discussed home. Recover from server-verified catalog
     # only when the buyer clearly requested a new search.
-    if state.get('_turn_intent')=='property_search' and search_results is None:
+    if commercial_search and search_results is None:
         from . import domain
         outcome=domain.search_properties(state)
         if outcome.get('ok'):
@@ -322,15 +324,11 @@ def validate_outbound(reply: str, state: dict) -> str:
                 'fields':['property_search'],
                 'message_id':state.get('_active_source_message_id'),
                 'timestamp':domain.now_local().isoformat()})
-    if state.get('_turn_intent')=='property_search' and search_results is not None:
-        names={c.upper() for c in re.findall(r'\bH-\d+\b',plain,re.I)}
-        matches={u['unit_id'] for u in search_results}
-        allowed=set(state.get('_allowed_alternative_units_this_turn') or [])
-        if (state.get('_automatic_search_recovery') or
-                bool(names-matches-allowed) or
-                (not matches and not re.search(
-                    r'\b(?:no (?:matches|houses|options)|none|no properties)\b',plain,re.I))):
-            return _matching_reply(search_results)
+    if commercial_search and search_results is not None:
+        if state.get('_automatic_search_recovery') or _search_answer_needs_repair(
+                plain,state,search_results):
+            return (_no_matches_for_state(state) if not search_results
+                    else _matching_reply(search_results))
     repaired=_verified_fact_reply(state,plain)
     if repaired is not None:
         state['_fact_answer_repaired_this_turn']=True
@@ -344,10 +342,15 @@ def validate_outbound(reply: str, state: dict) -> str:
         names={x.upper() for x in re.findall(r'\bH-\d+\b',plain,re.I)}
         matches={u['unit_id'] for u in search_results}
         alternatives=set(state.get('_allowed_alternative_units_this_turn') or [])
+        if commercial_search and not search_results:
+            closest=state.get('_search_nearest_out_of_budget_this_turn') or {}
+            if closest.get('unit_id'):
+                alternatives.add(closest['unit_id'])
         if (not names.issubset(matches|alternatives) or
                 sms.details(plain)['segments']>2 or
                 (bool(names.intersection(alternatives)) and not re.search(
                     r'\b(?:optional|alternative|different|extra)\b',plain,re.I))):
-            return _matching_reply(search_results)
+            return (_no_matches_for_state(state) if not search_results
+                    else _matching_reply(search_results))
     _record_sent_media(state,plain)
     return _suggest_available_assets(state,plain)
