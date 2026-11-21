@@ -51,6 +51,18 @@ def search_request(message: str) -> bool:
     if _BOOKING.search(text) and not _SEARCH.search(text):
         return False
     if _SEARCH.search(text):
+        # "Show me photos / details of this house" is a factual media/detail
+        # request; the command "show me" alone does NOT make it a search.
+        is_media=bool(re.search(r'\b(?:photos?|pictures?|gallery|images?|pdf|brochure|floor.?plans?)\b',text,re.I))
+        is_detail=bool(re.search(r'\b(?:details|features|characteristics|specifications)\b',text,re.I))
+        new_options=bool(re.search(
+            r'\b(?:other|another|alternatives?|different (?:homes?|houses?|properties)|'
+            r'options? (?:with|under|of)|houses? (?:with|under)|'
+            r'properties (?:with|under)|cheaper|more expensive)\b',text,re.I))
+        if (is_media or is_detail) and not new_options:
+            return False
+        if re.search(r'\b(?:financing|finance|mortgage|loan)\s+options?\b',text,re.I) and not new_options:
+            return False
         # "What's the price of H-201?" is a fact, not a search.
         if re.search(r'\b(?:what(?:.s| is) the price|how much is)\s+(?:of )?H-\d{3}',text,re.I):
             return False
