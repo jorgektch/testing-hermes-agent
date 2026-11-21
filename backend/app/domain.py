@@ -484,8 +484,14 @@ def end_turn(state: dict, reply: str) -> None:
     else:
         state['pending_media_offer'] = None
     state.pop('_approved_media_urls_this_turn', None)
+    state.pop('_media_resend_urls_this_turn', None)
+    state.pop('_tool_rejection_cache', None)
+    state.pop('_turn_property_ambiguous', None)
+    state.pop('_turn_property_resolution', None)
+    state.pop('_fact_answer_repaired_this_turn', None)
     state.pop('_matching_options_this_turn', None)
     state.pop('_details_for_current_turn', None)
+    state.pop('_last_inbound_topic', None)
     state.pop('_slot_queries_this_turn', None)
     state.pop('_booking_completion_error', None)
     state.pop('_allowed_alternative_units_this_turn', None)
