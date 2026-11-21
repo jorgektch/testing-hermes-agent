@@ -800,12 +800,24 @@ def unit_details(state: dict, unit_id: str) -> dict:
                  if u['unit_id'].casefold() == str(unit_id).strip().casefold()), None)
     if unit is None:
         return {'error': 'Unknown or unpublished house.'}
-    focused = state.get('exploring_unit_id') == unit['unit_id']
-    selected = state['lead'].get('interest_unit_id') == unit['unit_id']
-    if state.get('_active_source_message_id') and not _buyer_mentioned_house(state, unit['unit_id']) and not (focused or selected):
-        return {'error': 'Ask which house the buyer wants to explore before loading details.'}
+    resolution=state.get('_turn_property_resolution') or {}
+    # Public factual reads require an unambiguous conversational reference,
+    # never a buying-interest declaration or an appointment commitment.
+    if state.get('_active_source_message_id'):
+        if resolution.get('ambiguous'):
+            return {'error':'More than one property could match this question.',
+                    'error_code':'REFERENCE_AMBIGUOUS',
+                    'candidates':resolution.get('candidates',[]),
+                    'next_action':'Ask which one only if it is genuinely ambiguous.'}
+        if resolution.get('unit_id')!=unit['unit_id']:
+            return {'error':'The requested details do not match the discussed property.',
+                    'error_code':'PROPERTY_NOT_IN_CONTEXT',
+                    'resolved_unit_id':resolution.get('unit_id'),
+                    'next_action':'Use resolved_unit_id if present; do not ask the buyer to reconfirm it.'}
     _set_focus(state, unit['unit_id'])
+    state['conversation_phase']='property_details'
     return {'ok': True, 'unit_id': unit['unit_id'],
+            'reference_resolution': state.get('_turn_property_resolution'),
             'commercial_name': unit['commercial_name'],
             'property_type': unit['property_type'],
             'bedrooms': unit['bedrooms'], 'bathrooms': unit['bathrooms'],
@@ -851,9 +863,13 @@ def list_unit_assets(state: dict, unit_id: str) -> dict:
     unit = _units_by_code().get(unit_id)
     if not unit:
         return {'error':'Unknown or unpublished house.'}
+    reference=state.get('_turn_property_resolution') or {}
     if state.get('_active_source_message_id') and (
-        unit_id!=_focus(state).get('unit_id') and not _buyer_mentioned_house(state,unit_id)):
-        return {'error':'Ask which property the buyer is referring to.'}
+            reference.get('ambiguous') or reference.get('unit_id')!=unit_id):
+        return {'error':'The requested resources do not match an unambiguous property.',
+                'error_code':'PROPERTY_NOT_IN_CONTEXT',
+                'resolved_unit_id':reference.get('unit_id'),
+                'next_action':'Resolve the current property from conversation context.'}
     media=unit_media(unit_id)
     if media.get('error'):
         return media
@@ -1175,11 +1191,14 @@ def track_property_interest(state: dict, unit_id: str, status: str = 'discussed'
         return {'error': 'Unknown or non-public residential unit.'}
     if status not in ('discussed', 'considering', 'interested'):
         return {'error': 'Invalid interest status.'}
-    if state.get('_active_source_message_id') and not _buyer_mentioned_house(state, unit_id):
-        if state.get('exploring_unit_id') != unit_id and state['lead'].get('interest_unit_id') != unit_id:
-            return {'error': 'The lead has not referred to that house.'}
+    reference=state.get('_turn_property_resolution') or {}
+    if state.get('_active_source_message_id') and (
+            reference.get('ambiguous') or reference.get('unit_id')!=unit_id):
+        return {'error':'Cannot record interest without the correctly resolved house.',
+                'error_code':'PROPERTY_NOT_IN_CONTEXT',
+                'resolved_unit_id':reference.get('unit_id'),
+                'next_action':'Use resolved_unit_id; do not ask the buyer to repeat the house code.'}
     if status == 'interested' and state.get('_active_source_message_id'):
-        import re
         words = str(state.get('_active_source_message_text') or '').lower()
         # Merely asking for information or photos is NOT visit intent.
         visit_intent = re.search(r'\b(visit|tour|book|schedule|see in person|appointment|choose|select|pick|want|interested|like|prefer)\b', words)
@@ -1691,6 +1710,9 @@ def profile_snapshot(state: dict) -> dict:
         'conversation_focus': copy.deepcopy(_focus(state)),
         'visit_draft': copy.deepcopy(_draft(state)),
         'last_slot_search': copy.deepcopy(state.get('last_slot_search')),
+        'conversation_phase':state.get('conversation_phase','discovery'),
+        'last_presented_units':list(state.get('last_presented_units') or []),
+        'answered_topics':copy.deepcopy(state.get('answered_topics',[])[-12:]),
         'property_interests': list(state.get('property_interests') or []),
         'ui_fact_evidence': dict(state.get('ui_fact_evidence') or {}),
         'facts': {k: dict(v) for k,v in facts.items()},
