@@ -131,9 +131,7 @@ def test_typed_feature_search_respects_model_and_inventory():
     state=domain.blank_state()
     answer=domain.evaluate_properties(state,400000,'within 5 months',3,'House',
                                        {'kitchen_layout':'open','private_backyard':True})
-    assert [x['unit_id'] for x in answer['matching_properties']]==['H-101','H-104'] or (
-        'H-101' in [x['unit_id'] for x in answer['matching_properties']]
-    )
+    assert {'H-204','H-101','H-104'} == {x['unit_id'] for x in answer['matching_properties']}
     assert 'H-102' not in json.dumps(answer)
     assert 'error' in domain.evaluate_properties(state,400000,preferred_property_type='Condo')
     assert 'error' in domain.evaluate_properties(state,400000,required_features={'private_pool':True})

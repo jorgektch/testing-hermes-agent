@@ -317,7 +317,7 @@ def create_lead(auth: dict, first_name: str, last_name: str, email: str, phone: 
     lead_id=state['bp_episode']['ids']['lead_id']
     conv_id=state['bp_episode']['ids']['conversation_id']
     project_id=state['bp_episode']['ids']['project_id']
-    greeting=f"Hi {first_name}! I'm Ava, your AI advisor for Residencial Jardines del Sol. What budget are you considering, and when would you like to buy?"
+    greeting=f"Hi {first_name}! I'm the AI Sales Agent assigned to help you with your home search at Residencial Jardines del Sol. What kind of house are you looking for, and what budget are you considering?"
     message_id=str(uuid.uuid4())
     state['bp_episode']['sales_messages']=[]
     with database() as con:

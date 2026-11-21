@@ -30,3 +30,7 @@ The `backend/app/{team,availability,meetings,scheduling_policy,lead}.json` copie
 Unlike BlackPenguin's currently documented availability tables, the demo introduces `sales_availability_exceptions` with `kind: unavailable` and `kind: extra_availability`. The synthetic `day_offset` in fixtures is relative to the **current local day** (America/Lima). It is used to make the demo useful regardless of deployment date; **production appointments should always use absolute UTC instants**.
 
 `available_slots` is never stored as a table. A proposed option has a 30-minute expiry but does **not** hold capacity. The browser session can create one isolated meeting after confirmation. No calendar synchronization, concurrency protection between browsers, or real lead contact takes place.
+
+## v7 house-only sale scenario
+
+This active demo uses `transaction_type=sale` and a single published `house` category, while retaining a flexible BlackPenguin-inspired type/unit data model for future projects. Four independent fictional houses (H-201, H-204, H-101, H-104) are offered; reserved H-102 is not publishable. Apartment references in `references/` are original archived examples, not live listings. Old lead conversations and citations remain historical; do not remap their property IDs. Every published house has two synthetic illustrations and an individual PDF fact sheet.

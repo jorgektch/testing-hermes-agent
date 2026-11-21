@@ -284,7 +284,16 @@ def evaluate_properties(state: dict, max_budget_usd: int,
                         required_features: dict | None = None) -> dict:
     try:
         budget = int(max_budget_usd)
+        lead = state.get('lead', {})
+        # A tool call may not silently relax an already declared hard cap.
+        # This safeguards matching even if Hermes passes an incorrect value.
+        declared_budget = lead.get('budget_usd')
+        if declared_budget is not None:
+            budget = min(budget, int(declared_budget))
         beds = int(min_bedrooms) if min_bedrooms is not None else None
+        declared_beds = lead.get('min_bedrooms')
+        if declared_beds is not None:
+            beds = max(beds or 0, int(declared_beds))
         if budget <= 0 or (beds is not None and (beds < 1 or beds > 20)):
             raise ValueError
     except (TypeError, ValueError):
@@ -336,16 +345,25 @@ def evaluate_properties(state: dict, max_budget_usd: int,
             other.append(unit)
         else:
             matches.append(unit)
+    # Prefer the home closest to the requested bedroom count; 2-bed before
+    # 3-bed when the lead asks for at least two, while retaining valid extras.
+    matches.sort(key=lambda unit: ((unit['bedrooms']-beds) if beds else 0,
+                                   unit['price_usd'], unit['unit_id']))
+    out_budget.sort(key=lambda unit: (unit['exceeds_budget_by_usd'], unit['unit_id']))
     state['shortlisted_unit_ids'] = [u['unit_id'] for u in matches]
     state['stage'] = 'Properties matched' if matches else 'Exploring alternatives'
     record(state, 'matching', f'{len(matches)} matching properties · ${budget:,} budget')
     return {
-        'ok': True, 'matching_properties': matches,
+        'ok': True,
+        'applied_criteria': {'max_budget_usd': budget, 'min_bedrooms': beds,
+                             'preferred_property_type': chosen_type or 'Either',
+                             'transaction_type': 'sale'},
+        'matching_properties': matches,
         'out_of_budget_properties': out_budget,
         'other_nonmatching_properties': other,
         'interpreted_purchase_deadline': deadline.isoformat() if deadline else None,
         'timeframe_interpretation': interpretation,
-        'note': 'All homes are built residences. Financing details are discussed only at the onsite visit.'
+        'note': 'Only fictional houses for sale are listed. The maximum declared budget is a hard cap; over-budget homes are NOT matches and must not be proactively recommended. Financing details are discussed only at the onsite visit.'
     }
 
 

@@ -65,7 +65,7 @@ function PropertyDetails({unit,project,onClose}:{unit:Unit;project:Catalog['proj
     <div className="modal-content"><div className="property-modal-top"><strong>{usd.format(unit.price_usd)}</strong><span>{unit.status} · {dateText(unit.available_from_date)}</span></div>
       <h3>Identity & inventory</h3><div className="detail-grid">
         <Field label="Project" value={project.name}/><Field label="Unit code" value={unit.unit_id}/><Field label="Property type" value={unit.property_type}/><Field label="Type code" value={unit.property_type_code}/>
-        <Field label="Built area" value={`${unit.area_sqm} m²`}/><Field label="Lot area" value={unit.lot_area_m2==null?'Not specified':`${unit.lot_area_m2} m²`}/><Field label="Floor" value={unit.floor_number}/><Field label="Bedrooms" value={unit.bedrooms}/><Field label="Bathrooms" value={unit.bathrooms}/><Field label="Currency" value={unit.currency||'USD'}/><Field label="Status" value={unit.status}/><Field label="Available from" value={dateText(unit.available_from_date)}/><Field label="Inventory updated (UTC)" value={unit.demo_inventory_last_updated_at}/><Field label="Published" value={unit.publication_status||'Demo approved'}/><Field label="Phase" value={unit.phase_name}/><Field label="Phase ID" value={unit.phase_id}/><Field label="Type ID" value={unit.property_type_id}/>
+        <Field label="Built area" value={`${unit.area_sqm} m²`}/><Field label="Lot area" value={unit.lot_area_m2==null?'Not specified':`${unit.lot_area_m2} m²`}/>{unit.property_type!=='House'&&<Field label="Floor" value={unit.floor_number}/>}<Field label="Bedrooms" value={unit.bedrooms}/><Field label="Bathrooms" value={unit.bathrooms}/><Field label="Currency" value={unit.currency||'USD'}/><Field label="Status" value={unit.status}/><Field label="Available from" value={dateText(unit.available_from_date)}/><Field label="Inventory updated (UTC)" value={unit.demo_inventory_last_updated_at}/><Field label="Published" value={unit.publication_status||'Demo approved'}/><Field label="Phase" value={unit.phase_name}/><Field label="Phase ID" value={unit.phase_id}/><Field label="Type ID" value={unit.property_type_id}/>
       </div>
       {unit.property_model&&<><h3>Property model (type-level facts)</h3><div className="detail-grid">
         <Field label="Model" value={unit.property_model.model_name}/>
@@ -95,8 +95,7 @@ export default function Page(){
   const [leads,setLeads]=useState<Summary[]>([]);
   const [active,setActive]=useState<Lead|null>(null);
   const [showLeads,setShowLeads]=useState(false),[showCreate,setShowCreate]=useState(false),[form,setForm]=useState({...EMPTY_FORM});
-  const [filter,setFilter]=useState<'All'|'Apartment'|'House'>('All');
-  const [selected,setSelected]=useState<Unit|null>(null);
+    const [selected,setSelected]=useState<Unit|null>(null);
   const [leftView,setLeftView]=useState<'inventory'|'calendar'>('inventory');
   const [draft,setDraft]=useState('');const [busy,setBusy]=useState(false),[error,setError]=useState('');
   const [calendarTick,setCalendarTick]=useState(0),[deleteId,setDeleteId]=useState<string|null>(null),[deleteConfirm,setDeleteConfirm]=useState('');
@@ -121,7 +120,7 @@ export default function Page(){
       window.setTimeout(()=>setHighlightedMessage(v=>v===messageId?null:v),2400);}
   }
   const currentBooking=(state?.booked_visits||[]).find(b=>b.status==='confirmed');
-  const properties=(catalog?.properties||[]).filter(p=>filter==='All'||p.property_type===filter);
+  const properties=(catalog?.properties||[]).filter(p=>p.property_type==='House');
   const authorizedHeaders: Record<string,string>={'Content-Type':'application/json', ...(auth?{'X-Demo-Csrf':auth.csrf_token}:{})};
   const refreshLeads=useCallback(async()=>{const r=await fetch('/api/leads',{credentials:'same-origin'});if(r.ok)setLeads((await r.json()).leads)},[]);
   const selectLead=useCallback(async(id:string)=>{if(busy)return;setLiveProfile(null);setError('');const r=await fetch(`/api/leads/${id}`,{credentials:'same-origin'});if(!r.ok){setError('Unable to load lead');return;}setActive(await r.json());setDraft('');setShowLeads(false);setShowJump(false)},[busy]);
@@ -212,9 +211,9 @@ export default function Page(){
           <div className="panel-scroll">
             {leftView==='inventory'?<>
               {catalog&&<section className="project-strip"><div className="project-subtitle"><Building2 size={17}/> Project overview</div><h3>{catalog.project_info.name}</h3><div className="muted"><MapPin size={13}/>{catalog.project_info.location.city}, {catalog.project_info.location.country}</div><p>{catalog.project_info.value_proposition}</p><details><summary>Full project information</summary><div className="detail-grid"><Field label="Developer" value={catalog.project_info.developer}/><Field label="Development status" value={catalog.project_info.development_status}/><Field label="Type" value={catalog.project_info.project_type}/><Field label="Project code" value={catalog.project_info.project_code}/><Field label="Address" value={catalog.project_info.location.street_address}/><Field label="Published revision" value={catalog.project_info.published_revision}/></div><div className="amenities-inline">{catalog.project_info.amenities.map(a=><span key={a}>{a}</span>)}</div>{catalog.project_info.general_brochure_pdf&&<a href={catalog.project_info.general_brochure_pdf} target="_blank" rel="noopener noreferrer"><FileText size={14}/> Project brochure</a>}</details></section>}
-              <div className="filter-row"><strong>{properties.length} available units</strong><div className="toggle-row">{(['All','Apartment','House'] as const).map(f=><button key={f} className={filter===f?'current':''} onClick={()=>setFilter(f)}>{f==='All'?'All':`${f}s`}</button>)}</div></div>
+              <div className="filter-row"><strong>{properties.length} houses for sale</strong></div>
               <div className="unit-list">{properties.map(u=><button className="unit-row" key={u.unit_id} onClick={()=>setSelected(u)}><div className="unit-thumb">{u.media.gallery_urls.length?<img src={u.media.gallery_urls[0]} alt={`Illustration of ${u.unit_id}`}/>:<Images size={20}/>}</div><div><div className="unit-name"><strong>{u.unit_id}</strong><span>{u.property_type}</span></div><p>{u.commercial_name}</p><div className="unit-metrics"><BedDouble size={12}/>{u.bedrooms} <Bath size={12}/>{u.bathrooms} <Square size={12}/>{u.area_sqm} m²</div><div className="unit-price">{usd.format(u.price_usd)}<small>{u.status}</small></div></div><ChevronRight size={16}/></button>)}</div>
-              <p className="fineprint">Full published facts are available inside each unit record. Reserved inventory is not recommended by Hermes.</p>
+              <p className="fineprint">House prices and availability are synthetic. Full published facts are available in each house record; reserved homes are never recommended.</p>
             </>:<SalesCalendar refresh={calendarTick}/>}
           </div>
         </section>
@@ -227,13 +226,13 @@ export default function Page(){
               return <div key={m.id}>
                 {day!==previous&&<div className="chat-date-divider" aria-label={`Messages from ${day}`}>{day}</div>}
                 <div data-message-id={m.id} className={`message ${m.role} ${busy&&!m.sequence_number?'message-provisional':''} ${highlightedMessage===m.id?'message-highlighted':''}`}>
-                  <div className="message-meta"><span>{m.role==='assistant'?'Ava · Hermes':'Lead'}</span>
+                  <div className="message-meta"><span>{m.role==='assistant'?'AI Sales Agent · Hermes':'Lead'}</span>
                     <time dateTime={m.created_at} title={m.created_at}>{formatChatTimestamp(m.created_at,timeZone)}{busy&&!m.sequence_number?' · pending':''}</time></div>
                   <div className="message-content"><ChatMarkdown text={m.content}/></div>
                 </div>
               </div>;
             })}
-            {busy&&<div className="message assistant"><div className="message-role">Ava · Hermes</div><div className="message-content">Thinking…</div></div>}
+            {busy&&<div className="message assistant"><div className="message-role">AI Sales Agent · Hermes</div><div className="message-content">Thinking…</div></div>}
           </div>{showJump&&<button className="jump-bottom" onClick={()=>{chatBody.current?.scrollTo({top:chatBody.current.scrollHeight,behavior:'smooth'});setShowJump(false)}}><ArrowDown size={14}/> Latest</button>}
           <div className="composer-area"><div className="composer-box"><textarea rows={2} value={draft} onChange={e=>setDraft(e.target.value)} disabled={busy||state?.turn_count===MAX_TURNS} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();void send()}}} placeholder={state?.turn_count===MAX_TURNS?'Demo limit reached':'Type as this fictional lead…'}/><button className="send-btn" disabled={!draft.trim()||busy||state?.turn_count===MAX_TURNS} aria-label="Send" onClick={()=>void send()}><ArrowUp size={18}/></button></div><div className="fineprint">Conversations and meetings are saved in the shared demo database. No real sales notifications are sent.</div></div></>:<div className="empty-chat"><MessageCircle size={28}/><h3>Start with a demo lead</h3><p>Create fictional contact details or select a previous conversation.</p><button className="primary" onClick={()=>setShowCreate(true)}><Plus size={14}/> New lead</button></div>}
         </section>

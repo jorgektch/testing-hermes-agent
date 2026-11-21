@@ -5,6 +5,100 @@
   "schema_version": "hermes-demo/property-types/3.0",
   "property_types": [
     {
+      "id": "688a8807-743c-5a0d-8a28-98fa9795549f",
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "phase_id": "55555555-5555-4555-8555-555555555555",
+      "code": "CASA-2D",
+      "name": "Two-Bedroom Garden House",
+      "category": "house",
+      "description": "New two-bedroom house with a private garden and open-plan kitchen (synthetic).",
+      "bedrooms": 2,
+      "bathrooms": 2,
+      "built_area_min_m2": 110,
+      "built_area_max_m2": 110,
+      "lot_area_min_m2": 145,
+      "lot_area_max_m2": 145,
+      "total_units": 1,
+      "available_units": 1,
+      "starting_price": "245000.00",
+      "maximum_price": "245000.00",
+      "currency": "USD",
+      "review_status": "confirmed",
+      "inventory_updated_at": "2026-11-18T15:00:00Z",
+      "features": [
+        {
+          "feature_key": "kitchen_layout",
+          "value_text": "open",
+          "verification_status": "confirmed"
+        },
+        {
+          "feature_key": "private_backyard",
+          "value_bool": true,
+          "verification_status": "confirmed"
+        },
+        {
+          "feature_key": "backyard_area_m2",
+          "value_number": "18.0",
+          "verification_status": "confirmed"
+        },
+        {
+          "feature_key": "parking_spaces",
+          "value_number": "1",
+          "verification_status": "confirmed"
+        }
+      ],
+      "sort_order": 1,
+      "demo_data_only": true,
+      "source_reference": "Synthetic house-only evaluation scenario"
+    },
+    {
+      "id": "369f43b0-bc70-5a61-baae-9ab1b8071b84",
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "phase_id": "55555555-5555-4555-8555-555555555555",
+      "code": "CASA-3D-COMPACT",
+      "name": "Three-Bedroom Courtyard House",
+      "category": "house",
+      "description": "Compact three-bedroom house with a private courtyard and open kitchen (synthetic).",
+      "bedrooms": 3,
+      "bathrooms": 2,
+      "built_area_min_m2": 135,
+      "built_area_max_m2": 135,
+      "lot_area_min_m2": 170,
+      "lot_area_max_m2": 170,
+      "total_units": 1,
+      "available_units": 1,
+      "starting_price": "295000.00",
+      "maximum_price": "295000.00",
+      "currency": "USD",
+      "review_status": "confirmed",
+      "inventory_updated_at": "2026-11-18T15:00:00Z",
+      "features": [
+        {
+          "feature_key": "kitchen_layout",
+          "value_text": "open",
+          "verification_status": "confirmed"
+        },
+        {
+          "feature_key": "private_backyard",
+          "value_bool": true,
+          "verification_status": "confirmed"
+        },
+        {
+          "feature_key": "backyard_area_m2",
+          "value_number": "20.0",
+          "verification_status": "confirmed"
+        },
+        {
+          "feature_key": "parking_spaces",
+          "value_number": "1",
+          "verification_status": "confirmed"
+        }
+      ],
+      "sort_order": 2,
+      "demo_data_only": true,
+      "source_reference": "Synthetic house-only evaluation scenario"
+    },
+    {
       "id": "66666666-6666-4666-8666-666666666661",
       "project_id": "22222222-2222-4222-8222-222222222222",
       "phase_id": "55555555-5555-4555-8555-555555555555",
@@ -47,86 +141,8 @@
           "verification_status": "confirmed"
         }
       ],
-      "sort_order": 1,
-      "demo_data_only": true
-    },
-    {
-      "id": "66666666-6666-4666-8666-666666666662",
-      "project_id": "22222222-2222-4222-8222-222222222222",
-      "phase_id": "55555555-5555-4555-8555-555555555555",
-      "code": "DEPTO-2D",
-      "name": "Garden-View Two-Bedroom Apartment",
-      "category": "apartment",
-      "description": "Completed apartment with a private terrace (synthetic).",
-      "bedrooms": 2,
-      "bathrooms": 2,
-      "built_area_min_m2": 92,
-      "built_area_max_m2": 92,
-      "lot_area_min_m2": null,
-      "lot_area_max_m2": null,
-      "total_units": 1,
-      "available_units": 1,
-      "starting_price": "245000.00",
-      "maximum_price": "245000.00",
-      "currency": "USD",
-      "review_status": "confirmed",
-      "inventory_updated_at": "2026-11-18T15:00:00Z",
-      "features": [
-        {
-          "feature_key": "kitchen_layout",
-          "value_text": "closed",
-          "verification_status": "confirmed"
-        },
-        {
-          "feature_key": "private_terrace",
-          "value_bool": true,
-          "verification_status": "confirmed"
-        },
-        {
-          "feature_key": "parking_spaces",
-          "value_number": "1",
-          "verification_status": "confirmed"
-        }
-      ],
-      "sort_order": 2,
-      "demo_data_only": true
-    },
-    {
-      "id": "e01bb686-5289-54dd-ba34-6cd668c766c0",
-      "project_id": "22222222-2222-4222-8222-222222222222",
-      "phase_id": "55555555-5555-4555-8555-555555555555",
-      "code": "DEPTO-3D",
-      "name": "Three-Bedroom Family Apartment",
-      "category": "apartment",
-      "description": "Completed three-bedroom apartment with large windows and a balcony (synthetic).",
-      "bedrooms": 3,
-      "bathrooms": 2,
-      "built_area_min_m2": 112,
-      "built_area_max_m2": 112,
-      "lot_area_min_m2": null,
-      "lot_area_max_m2": null,
-      "total_units": 1,
-      "available_units": 1,
-      "starting_price": "295000.00",
-      "maximum_price": "295000.00",
-      "currency": "USD",
-      "review_status": "confirmed",
-      "inventory_updated_at": "2026-11-20T00:00:00Z",
-      "features": [
-        {
-          "feature_key": "kitchen_layout",
-          "value_text": "open",
-          "verification_status": "confirmed"
-        },
-        {
-          "feature_key": "parking_spaces",
-          "value_number": "1",
-          "verification_status": "confirmed"
-        }
-      ],
       "sort_order": 3,
-      "demo_data_only": true,
-      "source_reference": "Synthetic extension, not attached BlackPenguin source"
+      "demo_data_only": true
     },
     {
       "id": "bbfa4920-7450-5f5e-999c-5590747d1ccc",
@@ -166,7 +182,7 @@
           "verification_status": "confirmed"
         }
       ],
-      "sort_order": 4,
+      "sort_order": 6,
       "demo_data_only": true,
       "source_reference": "Synthetic extension, not attached BlackPenguin source"
     }

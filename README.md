@@ -1,6 +1,6 @@
-# Testing Hermes Agent — Real Estate Evaluation Lab (v5)
+# Testing Hermes Agent — House Sales Evaluation Lab (v7)
 
-A **single-screen evaluation workspace** for [Nous Research Hermes Agent](https://github.com/NousResearch/hermes-agent), OpenRouter, a **synthetic** real-estate catalog modeled after BlackPenguin's Project/Property Type/Unit/Lead contracts, and a shared advisor calendar.
+A **single-screen evaluation workspace** for [Nous Research Hermes Agent](https://github.com/NousResearch/hermes-agent), OpenRouter, a **synthetic house-for-sale** catalog modeled after BlackPenguin's Project/Property Type/Unit/Lead contracts, and a shared advisor calendar.
 
 **Stack:** Next.js 15 + React 19 + FastAPI + upstream Hermes `AIAgent` + OpenRouter `openai/gpt-4o-mini` + SQLite (local) / Turso **libSQL** (Vercel). The source is independent research code, not Nous Research or BlackPenguin production software.
 
@@ -11,12 +11,22 @@ A **single-screen evaluation workspace** for [Nous Research Hermes Agent](https:
 
 - **Single workspace, one sidebar link:** Inventory / Calendar left, Hermes chat center, per-lead structured state right.
 - **Complete approved-property inspector:** type/model/unit distinctions, areas, prices, inventory timestamps, verified typed features, local demo images/PDFs, and safe source JSON.
-- **No contextual "Ask Ava" button:** all conversational actions stay in chat. AI messages render Markdown safely; only approved local media and public property gallery URLs are clickable.
+- **No extra contextual agent button:** all conversational actions stay in chat. AI messages render Markdown safely; only approved local media and public property gallery URLs are clickable.
 - **Real calendar UI:** day/week, any subset of advisors, daily time-grid, multi-advisor events, available slots, occupied visits, buffers, viewer-local date/time marker, optional project-time mode, and expanded view. Refreshed every 20 seconds and after chat actions.
 - **Auth and durable leads:** administrator-only sign-in (no evaluator selector); a strong administrator password is recommended. Create leads with first/last name, email, phone; reopen all leads from any administrator session, including historical v4 leads.
 - **Shared scheduling:** 45-minute appointments plus 15-minute buffer; candidates every 30 minutes; three expiring proposals without holds; automatic revalidation; atomic 15-minute advisor occupation keys to reject overlapping concurrent bookings across visitors.
 - **Permanent admin deletion:** removes the lead, conversations, messages, Hermes histories, fact evidence, interest records, offers, meetings and occupancy allocations. Other tabs get 404 and clear their state on refresh; no application-level historical viewer remains.
 - **No browser-held signed transcript:** the backend owns Hermes continuation history and DB sessions are revocable. `DEMO_SIGNING_SECRET` now also signs the CSRF token.
+
+## v7 — House sales only (synthetic)
+
+- **Sales only:** project scope is `transaction_type=sale`, published categories are `house` only. The generic BlackPenguin model remains extensible for later companies; there are no rental or condo listings in this demo.
+- **Four published new houses:** `H-201` (2 bedrooms, **$245,000**, ready now), `H-204` (3 bedrooms, **$295,000**, available December 15, 2026), `H-101` (3 bedrooms, **$320,000**, ready now), `H-104` (4 bedrooms, **$395,000**, available March 1, 2027). All are *fictional*, with original demo illustrations and unit-specific PDFs. Reserved `H-102` remains unpublished.
+- **New units instead of relabeling apartments:** former `A-201` and `A-204` have been removed from the active source catalog. New unit and property-type IDs avoid falsely changing historical identities. No persisted lead messages, interests or meetings are rewritten. Historical conversations may still mention retired codes; they cannot be rebooked as current inventory.
+- **AI-first introduction:** new leads receive `I'm the AI Sales Agent assigned to help you...`. The same identity appears in Hermes's prompt and chat labels; old transcript text is preserved as historical evidence.
+- **Matching safeguard:** verified lead maximum budget is enforced server-side, minimum bedrooms are respected, exact bedroom-count matches rank before surplus bedrooms, and houses over budget are never listed as matches. Hermes still decides when to invoke business tools via `AIAgent.run_conversation()`.
+- **Source of truth:** edit `shared/blackpenguin/{project,property_types,units,assets}.json`, run `python scripts/build_catalog_from_blackpenguin.py`, then `python scripts/generate_demo_assets.py` (requires `reportlab` installed). Do **not** manually edit generated `shared/catalog.json` or `backend/app/catalog.json`.
+- **Media:** `/properties/H-201/gallery` and equivalent URLs aggregate only the given unit's images. A PDF in a unit card is a synthetic *fact sheet*, not a licensed construction plan or project-level brochure. Retired apartment asset files are retained on disk only to avoid breaking previously shared historical links, but are not in the public catalog.
 
 ## Architecture
 
@@ -169,7 +179,7 @@ For details, see [`docs/V4_ARCHITECTURE.md`](docs/V4_ARCHITECTURE.md).
 
 ## Property media and single administrator access (v5)
 
-- Public approved galleries use `/properties/<UNIT_CODE>/gallery` (e.g. `/properties/A-201/gallery`). The link requires no login and displays only approved images explicitly associated with that unit. When no approved images exist, no gallery link is advertised.
+- Public approved galleries use `/properties/<UNIT_CODE>/gallery` (e.g. `/properties/H-201/gallery`). The link requires no login and displays only approved images explicitly associated with that unit. When no approved images exist, no gallery link is advertised.
 - Each unit's documents contain **only** approved PDF assets with explicit `unit_id` coverage. Project/general brochures are not inherited into unit cards or `get_unit_media`. The legacy `floorplan_brochure_pdf` field remains solely for existing consumers; the canonical documents collection is `media.documents`.
 - Hermes `get_unit_media` returns one absolute gallery URL (when present) and unit-only PDF links. Set `DEMO_PUBLIC_BASE_URL` if the application has a different public domain. The frontend allows only trusted gallery/PDF paths in Markdown.
 - The login form has one administrator password; the server rejects `role=evaluator`, and existing evaluator cookies can no longer access protected endpoints. Existing lead records remain intact for administrators.

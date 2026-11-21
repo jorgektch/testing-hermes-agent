@@ -8,10 +8,10 @@
     "company_id": "11111111-1111-4111-8111-111111111111",
     "code": "CR-LIMA-001",
     "name": "Residencial Jardines del Sol",
-    "project_type": "mixed_residential",
+    "project_type": "single_family_residential",
     "development_status": "completed",
-    "short_description": "Casas y departamentos terminados con espacios verdes compartidos.",
-    "long_description": "A fictional completed residential development featuring houses and apartments, for simulated onsite sales visits.",
+    "short_description": "Casas nuevas en venta con áreas verdes compartidas (datos ficticios).",
+    "long_description": "A fictional residential development offering new single-family houses for purchase, with unit-specific availability and onsite sales visits.",
     "address": "Avenida Ejemplo 123, Urbanización Referencial (fictional address)",
     "city": "Lima",
     "region": "Lima",
@@ -30,7 +30,11 @@
     "default_currency": "USD",
     "cover_source_id": "bbbbbbb1-bbbb-4bbb-8bbb-bbbbbbbbbbb1",
     "created_at": "2026-09-03T14:00:00Z",
-    "developer": null
+    "developer": null,
+    "transaction_type": "sale",
+    "active_property_categories": [
+      "house"
+    ]
   },
   "profile": {
     "draft_revision": 9,
@@ -39,9 +43,9 @@
     "approved_for_sales_at": "2026-11-18T16:00:00Z",
     "fields": {
       "project_name": "Residencial Jardines del Sol",
-      "project_type": "Mixed-use",
+      "project_type": "Single-family residential",
       "project_status": "Completed",
-      "short_description": "Completed houses and apartments with shared green spaces (synthetic project).",
+      "short_description": "New houses for sale with shared green spaces (synthetic project).",
       "project_cover": "bbbbbbb1-bbbb-4bbb-8bbb-bbbbbbbbbbb1",
       "exact_address": "Avenida Ejemplo 123, Urbanización Referencial (fictional address)",
       "city": "Lima",
@@ -52,18 +56,18 @@
       ],
       "phases_and_towers": "Single phase — no towers",
       "property_type_catalog": [
+        "CASA-2D",
+        "CASA-3D-COMPACT",
         "CASA-3D",
-        "DEPTO-2D",
-        "DEPTO-3D",
         "CASA-4D"
       ],
       "typologies": [
-        "Three-bedroom house",
-        "Two-bedroom apartment",
-        "Three-bedroom apartment",
-        "Four-bedroom house"
+        "Two-bedroom garden house",
+        "Three-bedroom courtyard house",
+        "Three-bedroom family house",
+        "Four-bedroom premium house"
       ],
-      "areas": "92–215 m² of built area across the demo models",
+      "areas": "110–215 m² of built area across the demo house models",
       "bedrooms_and_bathrooms": "2–4 bedrooms; 2–3 bathrooms",
       "construction_details": "Reinforced concrete and finishes described in the synthetic approved fact sheet.",
       "amenities": [
@@ -79,11 +83,11 @@
         "bank_financing"
       ],
       "promotions": null,
-      "delivery_dates": "Immediate handover for demo units listed as available now; future dates are explicitly specified per newly added unit.",
+      "delivery_dates": "Immediate availability on some houses; future handover dates specified per unit.",
       "available_inventory": 4,
       "sales_authorization": true,
-      "target_audience": "Buyers interested in completed residential houses or apartments.",
-      "value_proposition": "Move-in-ready houses and apartments with shared greenery and unit-level inventory information.",
+      "target_audience": "Buyers seeking new single-family houses for purchase.",
+      "value_proposition": "New houses for sale with shared green spaces and unit-level inventory information.",
       "key_differentiators": [
         "Shared green spaces",
         "Unit-level inventory status",
@@ -100,7 +104,11 @@
         "META-2026-11"
       ],
       "meta_connection_verified": true,
-      "compliance_notes": "Synthetic demo only. No real financial terms, availability warranty, property offer or appointment guarantee."
+      "compliance_notes": "Synthetic demo only. No real financial terms, availability warranty, property offer or appointment guarantee.",
+      "transaction_type": "sale",
+      "active_property_categories": [
+        "house"
+      ]
     },
     "field_states_sample": {
       "project_status": {

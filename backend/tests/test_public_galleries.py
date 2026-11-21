@@ -11,7 +11,7 @@ PUBLIC = ROOT / 'frontend' / 'public'
 
 def test_gallery_url_matches_approved_images():
     catalog = domain.read_catalog()
-    expected = {'A-201': 2, 'A-204': 2, 'H-101': 0, 'H-104': 2}
+    expected = {'H-201': 2, 'H-204': 2, 'H-101': 2, 'H-104': 2}
     for unit in catalog['properties']:
         media = unit['media']
         count = len(media['gallery_urls'])
@@ -35,22 +35,21 @@ def test_only_unit_scoped_pdfs_are_published():
             assert doc['url'].endswith('.pdf')
             assert doc['url'] != project_brochure
             assert (PUBLIC / doc['url'].lstrip('/')).is_file()
-    assert not next(unit for unit in catalog['properties'] if unit['unit_id'] == 'A-204')['media']['documents']
+    assert all(unit['media']['documents'] for unit in catalog['properties'])
 
 
 def test_hermes_media_tool_only_returns_unit_files_and_single_url(monkeypatch):
     monkeypatch.setenv('DEMO_PUBLIC_BASE_URL', 'https://gallery.example.test')
-    data = domain.unit_media('A-201')
-    assert data['gallery_url'] == 'https://gallery.example.test/properties/A-201/gallery'
+    data = domain.unit_media('H-201')
+    assert data['gallery_url'] == 'https://gallery.example.test/properties/H-201/gallery'
     assert data['image_count'] == 2
     assert 'gallery_urls' not in data  # Hermes must share the consolidated viewer.
     assert len(data['documents']) == 1
-    assert data['documents'][0]['url'].endswith('/BP-A201-floorplan.pdf')
+    assert data['documents'][0]['url'].endswith('/BP-H201-factsheet.pdf')
     assert all('bp-project-overview' not in str(value) for value in data.values())
-    no_pdf = domain.unit_media('A-204')
-    assert no_pdf['documents'] == [] and not no_pdf['unit_pdf_available']
-    no_photo = domain.unit_media('H-101')
-    assert no_photo['gallery_url'] is None and not no_photo['gallery_available']
+    another = domain.unit_media('H-204')
+    assert another['unit_pdf_available'] and another['gallery_available']
+    assert domain.unit_media('H-101')['gallery_available']
     assert 'error' in domain.unit_media('invalid-unit')
 
 

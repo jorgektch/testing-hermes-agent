@@ -13,7 +13,7 @@ def test_all_catalog_media_references_resolve():
         links.extend(unit['media']['gallery_urls'])
         if unit['media']['floorplan_brochure_pdf']:
             links.append(unit['media']['floorplan_brochure_pdf'])
-    assert len(links) == 10
+    assert len(links) == 13
     for link in links:
         assert link.startswith('/demo-assets/')
         assert (PUBLIC / link.lstrip('/')).is_file(), link

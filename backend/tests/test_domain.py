@@ -6,25 +6,25 @@ def test_catalog_contains_one_project_four_available_homes():
     assert catalog['project_info']['project_id'] == '22222222-2222-4222-8222-222222222222'
     assert catalog['project_info']['name'] == 'Residencial Jardines del Sol'
     assert len(catalog['properties']) == 4
-    assert {u['property_type'] for u in catalog['properties']} == {'Apartment', 'House'}
-    assert {u['unit_id'] for u in catalog['properties']} == {'A-201','A-204','H-101','H-104'}
+    assert {u['property_type'] for u in catalog['properties']} == {'House'}
+    assert {u['unit_id'] for u in catalog['properties']} == {'H-201','H-204','H-101','H-104'}
     assert 'H-102' not in {u['unit_id'] for u in catalog['properties']}
 
 
 def test_media_combinations():
     data = {x['unit_id']: x for x in domain.read_catalog()['properties']}
-    assert data['A-201']['media']['gallery_urls'] and data['A-201']['media']['floorplan_brochure_pdf']
-    assert data['A-204']['media']['gallery_urls'] and data['A-204']['media']['floorplan_brochure_pdf'] is None
-    assert not data['H-101']['media']['gallery_urls'] and data['H-101']['media']['floorplan_brochure_pdf']
+    assert data['H-201']['media']['gallery_urls'] and data['H-201']['media']['floorplan_brochure_pdf']
+    assert data['H-204']['media']['gallery_urls'] and data['H-204']['media']['floorplan_brochure_pdf']
+    assert data['H-101']['media']['gallery_urls'] and data['H-101']['media']['floorplan_brochure_pdf']
     assert data['H-104']['media']['gallery_urls'] and data['H-104']['media']['floorplan_brochure_pdf']
 
 
 def test_match_budget_and_bedrooms():
     state = domain.blank_state()
     result = domain.evaluate_properties(state, 260000, 'within 2 months', 2)
-    assert [p['unit_id'] for p in result['matching_properties']] == ['A-201']
+    assert [p['unit_id'] for p in result['matching_properties']] == ['H-201']
     assert all(x['price_usd'] > 260000 for x in result['out_of_budget_properties'])
-    assert state['shortlisted_unit_ids'] == ['A-201']
+    assert state['shortlisted_unit_ids'] == ['H-201']
 
 
 def test_lead_progress_and_validation():
@@ -53,12 +53,12 @@ def test_available_slots_and_single_booking():
     assert offer['proposal_id'] == state['booking_proposal']['proposal_id']
     unconfirmed = domain.book_visit(state, 'Alice', 'Morgan', 'alice@example.org', '+51999999999',
                                     first['advisor_id'], first['date'], first['start_time'],
-                                    offer['proposal_id'], unit_id='A-201')
+                                    offer['proposal_id'], unit_id='H-201')
     assert 'error' in unconfirmed
     domain.begin_turn(state, 'Yes, please confirm that visit for me.')
     res = domain.book_visit(state, 'Alice', 'Morgan', 'alice@example.org', '+51999999999',
                             first['advisor_id'], first['date'], first['start_time'],
-                            offer['proposal_id'], unit_id='A-201')
+                            offer['proposal_id'], unit_id='H-201')
     assert res['ok'] is True
     assert res['booking']['visit_duration_minutes'] == 45
     assert res['booking']['buffer_minutes'] == 15
@@ -75,7 +75,7 @@ def test_available_slots_and_single_booking():
                    for s in domain.slots(state)['available_slots'])
     again = domain.book_visit(state, 'Alice', 'Morgan', 'alice@example.org', '+51999999999',
                               first['advisor_id'], first['date'], first['start_time'],
-                              offer['proposal_id'], unit_id='A-201')
+                              offer['proposal_id'], unit_id='H-201')
     assert 'error' in again
 
 
@@ -98,7 +98,7 @@ def test_offer_rejects_expired_or_wrong_proposal():
     domain.begin_turn(state,'Yes, confirm the appointment.')
     kwargs=dict(first_name='Alice',last_name='Morgan',email='alice@example.org',
                 phone='+51999999999',advisor_id=opt['advisor_id'],
-                date_str=opt['date'],start_time=opt['start_time'],unit_id='A-201')
+                date_str=opt['date'],start_time=opt['start_time'],unit_id='H-201')
     assert 'error' in domain.book_visit(state,proposal_id='fake',**kwargs)
     state['booking_proposal']['expires_at']='2000-01-01T00:00:00+00:00'
     assert 'expired' in domain.book_visit(state,proposal_id=proposal['proposal_id'],**kwargs)['error']

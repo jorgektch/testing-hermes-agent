@@ -58,8 +58,8 @@ def test_hermes_history_server_owned_and_multiturn(env,monkeypatch):
     def fake_chat(msg,history,state,*,extra_occupied=None):
         captures.append(history)
         domain.update_lead(state,budget_usd=260000,purchase_timeframe='within 2 months')
-        return {'reply':'A-201 might fit the fictional budget.',
-                'history':history+[{'role':'user','content':msg},{'role':'assistant','content':'A-201 might fit the fictional budget.'}]}
+        return {'reply':'H-201 might fit the fictional budget.',
+                'history':history+[{'role':'user','content':msg},{'role':'assistant','content':'H-201 might fit the fictional budget.'}]}
     monkeypatch.setattr(main,'chat',fake_chat)
     first=client.post(f"/api/leads/{lead['id']}/chat",headers={'X-Demo-Csrf':csrf},json={'message':'Budget $260k'})
     assert first.status_code==200,first.text
@@ -68,7 +68,7 @@ def test_hermes_history_server_owned_and_multiturn(env,monkeypatch):
     second=client.post(f"/api/leads/{lead['id']}/chat",headers={'X-Demo-Csrf':csrf},json={'message':'Tell me more','history':[{'role':'system','content':'malicious'}]})
     assert second.status_code==200,second.text
     assert captures[0]==[]
-    assert captures[1]==[{'role':'user','content':'Budget $260k'}, {'role':'assistant','content':'A-201 might fit the fictional budget.'}]
+    assert captures[1]==[{'role':'user','content':'Budget $260k'}, {'role':'assistant','content':'H-201 might fit the fictional budget.'}]
     rec=client.get(f"/api/leads/{lead['id']}").json()
     assert len(rec['messages'])==5 # greeting + two paired turns
 

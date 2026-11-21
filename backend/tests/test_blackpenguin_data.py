@@ -60,14 +60,14 @@ def test_references_to_media_resolve_to_local_files():
         paths.update(unit['media']['gallery_urls'])
         if unit['media']['floorplan_brochure_pdf']:
             paths.add(unit['media']['floorplan_brochure_pdf'])
-    assert len(paths)==10
+    assert len(paths)==13
     assert all((ROOT/'frontend'/'public'/p.lstrip('/')).exists() for p in paths)
 
 
 def test_declared_fact_revisions_and_dialogue_selection():
     state=domain.blank_state()
-    domain.begin_turn(state,'My budget is $300,000 and I like A-201.')
-    domain.update_lead(state,budget_usd=300000,interest_unit_id='A-201')
+    domain.begin_turn(state,'My budget is $300,000 and I like H-201.')
+    domain.update_lead(state,budget_usd=300000,interest_unit_id='H-201')
     domain.end_turn(state,'That apartment is a demo choice.')
     domain.begin_turn(state,'I can raise my budget to $350,000.')
     domain.update_lead(state,budget_usd=350000)

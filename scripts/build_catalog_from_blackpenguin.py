@@ -87,6 +87,8 @@ def build(allow_missing_assets: bool = False) -> dict:
     assert project['company_id'] == bp['company_id']
     assert profile['final_approved'] is True and project['sales_activation_status'] == 'ready'
     assert fields['sales_authorization'] is True
+    assert project.get('transaction_type') == 'sale'
+    assert project.get('active_property_categories') == ['house']
     types = {p['id']:p for p in bp['property_types'] if p.get('review_status')=='confirmed' and p.get('project_id')==project['id']}
     sources = {s['id']:s for s in bp['sources']}
     assets = [a for a in bp['approved_sales_assets'] if a.get('project_id')==project['id'] and a.get('company_id')==bp['company_id'] and _approved_asset(a,sources)]
@@ -139,7 +141,7 @@ def build(allow_missing_assets: bool = False) -> dict:
             continue
         typed=_confirmed_feature_items(typ.get('features',[]))
         typed.update(_confirmed_feature_items(u.get('features',[])))  # Unit overrides type, never unknown -> false.
-        if typ['category'] not in ('house','apartment'):
+        if typ['category'] not in project['active_property_categories']:
             continue
         properties.append({
             'unit_id':u['unit_code'],
@@ -193,13 +195,15 @@ def build(allow_missing_assets: bool = False) -> dict:
         if available_by_type[prop['property_type_id']]==1:
             prop['status']='Last Unit'
     properties.sort(key=lambda x:(x['price_usd'],x['unit_id']))
-    assert len(properties)>=4, f'Expected four available demo properties; found {len(properties)}'
+    assert len(properties)==4 and all(u['property_type']=='House' for u in properties), 'Expected four published houses for sale'
     assert brochure, 'Approved simulated overview brochure required'
     project_info={
         'project_id':project['id'],
         'company_id':bp['company_id'],
         'name':project['name'],
         'project_type':project.get('project_type'),
+        'transaction_type':project['transaction_type'],
+        'active_property_categories':project['active_property_categories'],
         'development_status':project.get('development_status'),
         'short_description':project.get('short_description'),
         'long_description':project.get('long_description'),
@@ -248,6 +252,6 @@ if __name__=='__main__':
     parser.add_argument('--allow-missing-assets',action='store_true',help='Only for bootstrapping freshly generated asset files')
     args=parser.parse_args()
     data=build(args.allow_missing_assets)
-    print(f"Published compatibility catalog: {data['project_info']['name']} / {len(data['properties'])} available residences / {len(data['sales_advisors'])} demo advisors")
+    print(f"Published compatibility catalog: {data['project_info']['name']} / {len(data['properties'])} available houses for sale / {len(data['sales_advisors'])} demo advisors")
     for p in data['properties']:
         print(f"  {p['unit_id']:6} {p['property_type']:9} ${p['price_usd']:>7,}  galleries={len(p['media']['gallery_urls'])}  pdf={bool(p['media']['floorplan_brochure_pdf'])}")

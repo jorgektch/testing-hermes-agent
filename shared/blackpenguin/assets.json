@@ -44,71 +44,11 @@
       "demo_data_only": true
     },
     {
-      "id": "fcc07c87-eaf9-5ffc-9828-93e425917ccf",
-      "project_id": "22222222-2222-4222-8222-222222222222",
-      "kind": "uploaded_file",
-      "name": "Synthetic architectural illustration: A-201",
-      "url": "/demo-assets/BP-A201-01.svg",
-      "mime_type": "image/svg+xml",
-      "status": "ready",
-      "sharing_intent": "public",
-      "is_primary": false,
-      "demo_data_only": true
-    },
-    {
-      "id": "169e4cb3-4385-527a-b1e9-9acc31ec105d",
-      "project_id": "22222222-2222-4222-8222-222222222222",
-      "kind": "uploaded_file",
-      "name": "Synthetic architectural illustration: A-201",
-      "url": "/demo-assets/BP-A201-02.svg",
-      "mime_type": "image/svg+xml",
-      "status": "ready",
-      "sharing_intent": "public",
-      "is_primary": false,
-      "demo_data_only": true
-    },
-    {
-      "id": "98156b09-e560-5008-9ec7-bcf2e48a70a2",
-      "project_id": "22222222-2222-4222-8222-222222222222",
-      "kind": "uploaded_file",
-      "name": "Synthetic unit fact sheet: A-201",
-      "url": "/demo-assets/BP-A201-floorplan.pdf",
-      "mime_type": "application/pdf",
-      "status": "ready",
-      "sharing_intent": "public",
-      "is_primary": false,
-      "demo_data_only": true
-    },
-    {
-      "id": "c14f324f-1fce-54c0-bdb4-170257ce6efc",
-      "project_id": "22222222-2222-4222-8222-222222222222",
-      "kind": "uploaded_file",
-      "name": "Synthetic architectural illustration: A-204",
-      "url": "/demo-assets/BP-A204-01.svg",
-      "mime_type": "image/svg+xml",
-      "status": "ready",
-      "sharing_intent": "public",
-      "is_primary": false,
-      "demo_data_only": true
-    },
-    {
-      "id": "70c97e19-faa0-52fc-bb50-de13c48cdb93",
-      "project_id": "22222222-2222-4222-8222-222222222222",
-      "kind": "uploaded_file",
-      "name": "Synthetic architectural illustration: A-204",
-      "url": "/demo-assets/BP-A204-02.svg",
-      "mime_type": "image/svg+xml",
-      "status": "ready",
-      "sharing_intent": "public",
-      "is_primary": false,
-      "demo_data_only": true
-    },
-    {
       "id": "4d755707-7b4d-55e0-b5c6-b34ccba417b3",
       "project_id": "22222222-2222-4222-8222-222222222222",
       "kind": "uploaded_file",
-      "name": "Synthetic unit fact sheet: H-101",
-      "url": "/demo-assets/BP-H101-floorplan.pdf",
+      "name": "Synthetic property fact sheet: H-101",
+      "url": "/demo-assets/BP-H101-factsheet.pdf",
       "mime_type": "application/pdf",
       "status": "ready",
       "sharing_intent": "public",
@@ -143,9 +83,105 @@
       "id": "fda87ccf-3023-5c87-91d1-bec0ef94d40b",
       "project_id": "22222222-2222-4222-8222-222222222222",
       "kind": "uploaded_file",
-      "name": "Synthetic unit fact sheet: H-104",
-      "url": "/demo-assets/BP-H104-floorplan.pdf",
+      "name": "Synthetic property fact sheet: H-104",
+      "url": "/demo-assets/BP-H104-factsheet.pdf",
       "mime_type": "application/pdf",
+      "status": "ready",
+      "sharing_intent": "public",
+      "is_primary": false,
+      "demo_data_only": true
+    },
+    {
+      "id": "10eceec4-e972-51df-9bcc-4a6a70810652",
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "kind": "uploaded_file",
+      "name": "Synthetic architectural illustration: H-201",
+      "url": "/demo-assets/BP-H201-01.svg",
+      "mime_type": "image/svg+xml",
+      "status": "ready",
+      "sharing_intent": "public",
+      "is_primary": false,
+      "demo_data_only": true
+    },
+    {
+      "id": "62d2cf62-31c2-574c-be0b-800a2a7e4eba",
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "kind": "uploaded_file",
+      "name": "Synthetic architectural illustration: H-201",
+      "url": "/demo-assets/BP-H201-02.svg",
+      "mime_type": "image/svg+xml",
+      "status": "ready",
+      "sharing_intent": "public",
+      "is_primary": false,
+      "demo_data_only": true
+    },
+    {
+      "id": "87215492-6810-5289-bc93-a1db6d8b3813",
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "kind": "uploaded_file",
+      "name": "Synthetic property fact sheet: H-201",
+      "url": "/demo-assets/BP-H201-factsheet.pdf",
+      "mime_type": "application/pdf",
+      "status": "ready",
+      "sharing_intent": "public",
+      "is_primary": false,
+      "demo_data_only": true
+    },
+    {
+      "id": "92f2205f-9de2-5b58-b226-90ed0a25afbf",
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "kind": "uploaded_file",
+      "name": "Synthetic architectural illustration: H-204",
+      "url": "/demo-assets/BP-H204-01.svg",
+      "mime_type": "image/svg+xml",
+      "status": "ready",
+      "sharing_intent": "public",
+      "is_primary": false,
+      "demo_data_only": true
+    },
+    {
+      "id": "83bd2502-42f3-52f0-a307-9673eda81e97",
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "kind": "uploaded_file",
+      "name": "Synthetic architectural illustration: H-204",
+      "url": "/demo-assets/BP-H204-02.svg",
+      "mime_type": "image/svg+xml",
+      "status": "ready",
+      "sharing_intent": "public",
+      "is_primary": false,
+      "demo_data_only": true
+    },
+    {
+      "id": "341985e0-ce00-57b6-a62e-9f0b4019c7a3",
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "kind": "uploaded_file",
+      "name": "Synthetic property fact sheet: H-204",
+      "url": "/demo-assets/BP-H204-factsheet.pdf",
+      "mime_type": "application/pdf",
+      "status": "ready",
+      "sharing_intent": "public",
+      "is_primary": false,
+      "demo_data_only": true
+    },
+    {
+      "id": "c2755c5b-2e55-579e-8472-aa020e0f984f",
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "kind": "uploaded_file",
+      "name": "Synthetic architectural illustration: H-101",
+      "url": "/demo-assets/BP-H101-01.svg",
+      "mime_type": "image/svg+xml",
+      "status": "ready",
+      "sharing_intent": "public",
+      "is_primary": false,
+      "demo_data_only": true
+    },
+    {
+      "id": "6dabbf5f-654c-590c-9007-7961b2c427ad",
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "kind": "uploaded_file",
+      "name": "Synthetic architectural illustration: H-101",
+      "url": "/demo-assets/BP-H101-02.svg",
+      "mime_type": "image/svg+xml",
       "status": "ready",
       "sharing_intent": "public",
       "is_primary": false,
@@ -177,18 +213,6 @@
             3
           ],
           "summary": "Modelo casa"
-        },
-        {
-          "property_type_id": "66666666-6666-4666-8666-666666666662",
-          "unit_id": null,
-          "content_tags": [
-            "brochure"
-          ],
-          "pages": [
-            4,
-            5
-          ],
-          "summary": "Modelo departamento"
         }
       ]
     },
@@ -221,152 +245,12 @@
       "demo_approval_only": true
     },
     {
-      "id": "f3f038d5-45fb-5546-aea6-3c07093089f2",
-      "company_id": "11111111-1111-4111-8111-111111111111",
-      "project_id": "22222222-2222-4222-8222-222222222222",
-      "source_id": "fcc07c87-eaf9-5ffc-9828-93e425917ccf",
-      "asset_type": "gallery_image",
-      "display_name": "Synthetic architectural illustration: A-201",
-      "description": "Synthetic file for test only, not a real-world architectural document or listing photo.",
-      "approval_status": "approved",
-      "allowed_channels": [
-        "simulation"
-      ],
-      "valid_from": "2026-01-01T00:00:00Z",
-      "valid_until": null,
-      "version": 1,
-      "coverage": [
-        {
-          "property_type_id": "66666666-6666-4666-8666-666666666662",
-          "unit_id": "77777777-7777-4777-8777-777777777773",
-          "content_tags": [
-            "gallery_image"
-          ],
-          "pages": [],
-          "summary": "Synthetic architectural illustration: A-201"
-        }
-      ],
-      "demo_approval_only": true
-    },
-    {
-      "id": "edf7c510-8f70-5094-b985-891fd4159b86",
-      "company_id": "11111111-1111-4111-8111-111111111111",
-      "project_id": "22222222-2222-4222-8222-222222222222",
-      "source_id": "169e4cb3-4385-527a-b1e9-9acc31ec105d",
-      "asset_type": "gallery_image",
-      "display_name": "Synthetic architectural illustration: A-201",
-      "description": "Synthetic file for test only, not a real-world architectural document or listing photo.",
-      "approval_status": "approved",
-      "allowed_channels": [
-        "simulation"
-      ],
-      "valid_from": "2026-01-01T00:00:00Z",
-      "valid_until": null,
-      "version": 1,
-      "coverage": [
-        {
-          "property_type_id": "66666666-6666-4666-8666-666666666662",
-          "unit_id": "77777777-7777-4777-8777-777777777773",
-          "content_tags": [
-            "gallery_image"
-          ],
-          "pages": [],
-          "summary": "Synthetic architectural illustration: A-201"
-        }
-      ],
-      "demo_approval_only": true
-    },
-    {
-      "id": "3df2fc4c-4528-5058-bcc5-f20696a356c6",
-      "company_id": "11111111-1111-4111-8111-111111111111",
-      "project_id": "22222222-2222-4222-8222-222222222222",
-      "source_id": "98156b09-e560-5008-9ec7-bcf2e48a70a2",
-      "asset_type": "floor_plan",
-      "display_name": "Synthetic unit fact sheet: A-201",
-      "description": "Synthetic file for test only, not a real-world architectural document or listing photo.",
-      "approval_status": "approved",
-      "allowed_channels": [
-        "simulation"
-      ],
-      "valid_from": "2026-01-01T00:00:00Z",
-      "valid_until": null,
-      "version": 1,
-      "coverage": [
-        {
-          "property_type_id": "66666666-6666-4666-8666-666666666662",
-          "unit_id": "77777777-7777-4777-8777-777777777773",
-          "content_tags": [
-            "floor_plan"
-          ],
-          "pages": [],
-          "summary": "Synthetic unit fact sheet: A-201"
-        }
-      ],
-      "demo_approval_only": true
-    },
-    {
-      "id": "5a8e11b9-7987-5884-ad83-2135e4d56aa8",
-      "company_id": "11111111-1111-4111-8111-111111111111",
-      "project_id": "22222222-2222-4222-8222-222222222222",
-      "source_id": "c14f324f-1fce-54c0-bdb4-170257ce6efc",
-      "asset_type": "gallery_image",
-      "display_name": "Synthetic architectural illustration: A-204",
-      "description": "Synthetic file for test only, not a real-world architectural document or listing photo.",
-      "approval_status": "approved",
-      "allowed_channels": [
-        "simulation"
-      ],
-      "valid_from": "2026-01-01T00:00:00Z",
-      "valid_until": null,
-      "version": 1,
-      "coverage": [
-        {
-          "property_type_id": "e01bb686-5289-54dd-ba34-6cd668c766c0",
-          "unit_id": "3bdeda37-956b-5356-bb9f-a83ed76edac6",
-          "content_tags": [
-            "gallery_image"
-          ],
-          "pages": [],
-          "summary": "Synthetic architectural illustration: A-204"
-        }
-      ],
-      "demo_approval_only": true
-    },
-    {
-      "id": "9df36417-9ceb-5548-a40c-be055cde34cc",
-      "company_id": "11111111-1111-4111-8111-111111111111",
-      "project_id": "22222222-2222-4222-8222-222222222222",
-      "source_id": "70c97e19-faa0-52fc-bb50-de13c48cdb93",
-      "asset_type": "gallery_image",
-      "display_name": "Synthetic architectural illustration: A-204",
-      "description": "Synthetic file for test only, not a real-world architectural document or listing photo.",
-      "approval_status": "approved",
-      "allowed_channels": [
-        "simulation"
-      ],
-      "valid_from": "2026-01-01T00:00:00Z",
-      "valid_until": null,
-      "version": 1,
-      "coverage": [
-        {
-          "property_type_id": "e01bb686-5289-54dd-ba34-6cd668c766c0",
-          "unit_id": "3bdeda37-956b-5356-bb9f-a83ed76edac6",
-          "content_tags": [
-            "gallery_image"
-          ],
-          "pages": [],
-          "summary": "Synthetic architectural illustration: A-204"
-        }
-      ],
-      "demo_approval_only": true
-    },
-    {
       "id": "8d5d7a49-80cf-5868-9b8b-cd3532af63bc",
       "company_id": "11111111-1111-4111-8111-111111111111",
       "project_id": "22222222-2222-4222-8222-222222222222",
       "source_id": "4d755707-7b4d-55e0-b5c6-b34ccba417b3",
-      "asset_type": "floor_plan",
-      "display_name": "Synthetic unit fact sheet: H-101",
+      "asset_type": "brochure",
+      "display_name": "Property fact sheet — H-101",
       "description": "Synthetic file for test only, not a real-world architectural document or listing photo.",
       "approval_status": "approved",
       "allowed_channels": [
@@ -380,10 +264,10 @@
           "property_type_id": "66666666-6666-4666-8666-666666666661",
           "unit_id": "77777777-7777-4777-8777-777777777771",
           "content_tags": [
-            "floor_plan"
+            "brochure"
           ],
           "pages": [],
-          "summary": "Synthetic unit fact sheet: H-101"
+          "summary": "Property fact sheet — H-101"
         }
       ],
       "demo_approval_only": true
@@ -449,8 +333,8 @@
       "company_id": "11111111-1111-4111-8111-111111111111",
       "project_id": "22222222-2222-4222-8222-222222222222",
       "source_id": "fda87ccf-3023-5c87-91d1-bec0ef94d40b",
-      "asset_type": "floor_plan",
-      "display_name": "Synthetic unit fact sheet: H-104",
+      "asset_type": "brochure",
+      "display_name": "Property fact sheet — H-104",
       "description": "Synthetic file for test only, not a real-world architectural document or listing photo.",
       "approval_status": "approved",
       "allowed_channels": [
@@ -464,48 +348,240 @@
           "property_type_id": "bbfa4920-7450-5f5e-999c-5590747d1ccc",
           "unit_id": "b6699608-a056-5db0-877e-e3a54117245d",
           "content_tags": [
-            "floor_plan"
+            "brochure"
           ],
           "pages": [],
-          "summary": "Synthetic unit fact sheet: H-104"
+          "summary": "Property fact sheet — H-104"
+        }
+      ],
+      "demo_approval_only": true
+    },
+    {
+      "id": "3e46604e-76af-56ca-86d9-8335c7efc636",
+      "company_id": "11111111-1111-4111-8111-111111111111",
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "source_id": "10eceec4-e972-51df-9bcc-4a6a70810652",
+      "asset_type": "gallery_image",
+      "display_name": "Synthetic architectural illustration: H-201",
+      "description": "Synthetic demo material for a fictional house; not a real listing, image or architectural plan.",
+      "approval_status": "approved",
+      "allowed_channels": [
+        "simulation"
+      ],
+      "valid_from": "2026-01-01T00:00:00Z",
+      "valid_until": null,
+      "version": 1,
+      "coverage": [
+        {
+          "property_type_id": "688a8807-743c-5a0d-8a28-98fa9795549f",
+          "unit_id": "7308a31e-3b71-59ec-af95-b2489f01745d",
+          "content_tags": [
+            "gallery_image"
+          ],
+          "pages": [],
+          "summary": "Synthetic architectural illustration: H-201"
+        }
+      ],
+      "demo_approval_only": true
+    },
+    {
+      "id": "e6a13969-97c0-5a39-b49b-1381cb805713",
+      "company_id": "11111111-1111-4111-8111-111111111111",
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "source_id": "62d2cf62-31c2-574c-be0b-800a2a7e4eba",
+      "asset_type": "gallery_image",
+      "display_name": "Synthetic architectural illustration: H-201",
+      "description": "Synthetic demo material for a fictional house; not a real listing, image or architectural plan.",
+      "approval_status": "approved",
+      "allowed_channels": [
+        "simulation"
+      ],
+      "valid_from": "2026-01-01T00:00:00Z",
+      "valid_until": null,
+      "version": 1,
+      "coverage": [
+        {
+          "property_type_id": "688a8807-743c-5a0d-8a28-98fa9795549f",
+          "unit_id": "7308a31e-3b71-59ec-af95-b2489f01745d",
+          "content_tags": [
+            "gallery_image"
+          ],
+          "pages": [],
+          "summary": "Synthetic architectural illustration: H-201"
+        }
+      ],
+      "demo_approval_only": true
+    },
+    {
+      "id": "0fb899a6-43c9-5786-998d-3cb427fe6cf3",
+      "company_id": "11111111-1111-4111-8111-111111111111",
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "source_id": "87215492-6810-5289-bc93-a1db6d8b3813",
+      "asset_type": "brochure",
+      "display_name": "Property fact sheet — H-201",
+      "description": "Synthetic demo material for a fictional house; not a real listing, image or architectural plan.",
+      "approval_status": "approved",
+      "allowed_channels": [
+        "simulation"
+      ],
+      "valid_from": "2026-01-01T00:00:00Z",
+      "valid_until": null,
+      "version": 1,
+      "coverage": [
+        {
+          "property_type_id": "688a8807-743c-5a0d-8a28-98fa9795549f",
+          "unit_id": "7308a31e-3b71-59ec-af95-b2489f01745d",
+          "content_tags": [
+            "brochure"
+          ],
+          "pages": [],
+          "summary": "Property fact sheet — H-201"
+        }
+      ],
+      "demo_approval_only": true
+    },
+    {
+      "id": "0c13b21d-3020-5fe4-b3ca-8c3c4311a869",
+      "company_id": "11111111-1111-4111-8111-111111111111",
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "source_id": "92f2205f-9de2-5b58-b226-90ed0a25afbf",
+      "asset_type": "gallery_image",
+      "display_name": "Synthetic architectural illustration: H-204",
+      "description": "Synthetic demo material for a fictional house; not a real listing, image or architectural plan.",
+      "approval_status": "approved",
+      "allowed_channels": [
+        "simulation"
+      ],
+      "valid_from": "2026-01-01T00:00:00Z",
+      "valid_until": null,
+      "version": 1,
+      "coverage": [
+        {
+          "property_type_id": "369f43b0-bc70-5a61-baae-9ab1b8071b84",
+          "unit_id": "5ef1980b-a96e-5ff8-8a51-2b36193f3423",
+          "content_tags": [
+            "gallery_image"
+          ],
+          "pages": [],
+          "summary": "Synthetic architectural illustration: H-204"
+        }
+      ],
+      "demo_approval_only": true
+    },
+    {
+      "id": "fe172ac4-5487-5080-be56-2aae4398cbf3",
+      "company_id": "11111111-1111-4111-8111-111111111111",
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "source_id": "83bd2502-42f3-52f0-a307-9673eda81e97",
+      "asset_type": "gallery_image",
+      "display_name": "Synthetic architectural illustration: H-204",
+      "description": "Synthetic demo material for a fictional house; not a real listing, image or architectural plan.",
+      "approval_status": "approved",
+      "allowed_channels": [
+        "simulation"
+      ],
+      "valid_from": "2026-01-01T00:00:00Z",
+      "valid_until": null,
+      "version": 1,
+      "coverage": [
+        {
+          "property_type_id": "369f43b0-bc70-5a61-baae-9ab1b8071b84",
+          "unit_id": "5ef1980b-a96e-5ff8-8a51-2b36193f3423",
+          "content_tags": [
+            "gallery_image"
+          ],
+          "pages": [],
+          "summary": "Synthetic architectural illustration: H-204"
+        }
+      ],
+      "demo_approval_only": true
+    },
+    {
+      "id": "03f09070-eb81-5241-8109-51d36ee32190",
+      "company_id": "11111111-1111-4111-8111-111111111111",
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "source_id": "341985e0-ce00-57b6-a62e-9f0b4019c7a3",
+      "asset_type": "brochure",
+      "display_name": "Property fact sheet — H-204",
+      "description": "Synthetic demo material for a fictional house; not a real listing, image or architectural plan.",
+      "approval_status": "approved",
+      "allowed_channels": [
+        "simulation"
+      ],
+      "valid_from": "2026-01-01T00:00:00Z",
+      "valid_until": null,
+      "version": 1,
+      "coverage": [
+        {
+          "property_type_id": "369f43b0-bc70-5a61-baae-9ab1b8071b84",
+          "unit_id": "5ef1980b-a96e-5ff8-8a51-2b36193f3423",
+          "content_tags": [
+            "brochure"
+          ],
+          "pages": [],
+          "summary": "Property fact sheet — H-204"
+        }
+      ],
+      "demo_approval_only": true
+    },
+    {
+      "id": "ae8fe203-20cf-564e-bcd6-33e4232cd1c4",
+      "company_id": "11111111-1111-4111-8111-111111111111",
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "source_id": "c2755c5b-2e55-579e-8472-aa020e0f984f",
+      "asset_type": "gallery_image",
+      "display_name": "Synthetic architectural illustration: H-101",
+      "description": "Synthetic demo material for a fictional house; not a real listing, image or architectural plan.",
+      "approval_status": "approved",
+      "allowed_channels": [
+        "simulation"
+      ],
+      "valid_from": "2026-01-01T00:00:00Z",
+      "valid_until": null,
+      "version": 1,
+      "coverage": [
+        {
+          "property_type_id": "66666666-6666-4666-8666-666666666661",
+          "unit_id": "77777777-7777-4777-8777-777777777771",
+          "content_tags": [
+            "gallery_image"
+          ],
+          "pages": [],
+          "summary": "Synthetic architectural illustration: H-101"
+        }
+      ],
+      "demo_approval_only": true
+    },
+    {
+      "id": "63747c6c-cfc1-5b2e-af29-15b8faeb1d53",
+      "company_id": "11111111-1111-4111-8111-111111111111",
+      "project_id": "22222222-2222-4222-8222-222222222222",
+      "source_id": "6dabbf5f-654c-590c-9007-7961b2c427ad",
+      "asset_type": "gallery_image",
+      "display_name": "Synthetic architectural illustration: H-101",
+      "description": "Synthetic demo material for a fictional house; not a real listing, image or architectural plan.",
+      "approval_status": "approved",
+      "allowed_channels": [
+        "simulation"
+      ],
+      "valid_from": "2026-01-01T00:00:00Z",
+      "valid_until": null,
+      "version": 1,
+      "coverage": [
+        {
+          "property_type_id": "66666666-6666-4666-8666-666666666661",
+          "unit_id": "77777777-7777-4777-8777-777777777771",
+          "content_tags": [
+            "gallery_image"
+          ],
+          "pages": [],
+          "summary": "Synthetic architectural illustration: H-101"
         }
       ],
       "demo_approval_only": true
     }
   ],
   "project_property_type_media": [
-    {
-      "id": "83f47efd-8941-544c-bb9c-055aab953a6a",
-      "property_type_id": "66666666-6666-4666-8666-666666666662",
-      "source_id": "fcc07c87-eaf9-5ffc-9828-93e425917ccf",
-      "caption": "Synthetic architectural illustration: A-201",
-      "sort_order": 1,
-      "demo_data_only": true
-    },
-    {
-      "id": "907e46ca-2523-5f5a-b9b1-7b3e196298ae",
-      "property_type_id": "66666666-6666-4666-8666-666666666662",
-      "source_id": "169e4cb3-4385-527a-b1e9-9acc31ec105d",
-      "caption": "Synthetic architectural illustration: A-201",
-      "sort_order": 2,
-      "demo_data_only": true
-    },
-    {
-      "id": "8a2b2669-4aae-5d88-9182-54e1a3e807e8",
-      "property_type_id": "e01bb686-5289-54dd-ba34-6cd668c766c0",
-      "source_id": "c14f324f-1fce-54c0-bdb4-170257ce6efc",
-      "caption": "Synthetic architectural illustration: A-204",
-      "sort_order": 1,
-      "demo_data_only": true
-    },
-    {
-      "id": "a5f2aa4b-09f0-501a-a763-fd74cb54ea66",
-      "property_type_id": "e01bb686-5289-54dd-ba34-6cd668c766c0",
-      "source_id": "70c97e19-faa0-52fc-bb50-de13c48cdb93",
-      "caption": "Synthetic architectural illustration: A-204",
-      "sort_order": 2,
-      "demo_data_only": true
-    },
     {
       "id": "4234cc55-9110-57b2-aff2-c03da2dba2c5",
       "property_type_id": "bbfa4920-7450-5f5e-999c-5590747d1ccc",
@@ -519,6 +595,54 @@
       "property_type_id": "bbfa4920-7450-5f5e-999c-5590747d1ccc",
       "source_id": "35a39775-6135-5c46-bfad-a6b7dc24adb5",
       "caption": "Synthetic architectural illustration: H-104",
+      "sort_order": 2,
+      "demo_data_only": true
+    },
+    {
+      "id": "9deb7bd5-626a-5be8-8695-7add0fb94d97",
+      "property_type_id": "688a8807-743c-5a0d-8a28-98fa9795549f",
+      "source_id": "10eceec4-e972-51df-9bcc-4a6a70810652",
+      "caption": "Synthetic architectural illustration: H-201",
+      "sort_order": 1,
+      "demo_data_only": true
+    },
+    {
+      "id": "341f6bc6-fd8a-5d56-a5ae-5e7ebe75a189",
+      "property_type_id": "688a8807-743c-5a0d-8a28-98fa9795549f",
+      "source_id": "62d2cf62-31c2-574c-be0b-800a2a7e4eba",
+      "caption": "Synthetic architectural illustration: H-201",
+      "sort_order": 2,
+      "demo_data_only": true
+    },
+    {
+      "id": "550209dc-f502-5f10-970d-64f879962bfc",
+      "property_type_id": "369f43b0-bc70-5a61-baae-9ab1b8071b84",
+      "source_id": "92f2205f-9de2-5b58-b226-90ed0a25afbf",
+      "caption": "Synthetic architectural illustration: H-204",
+      "sort_order": 1,
+      "demo_data_only": true
+    },
+    {
+      "id": "88f461ec-2c44-5ad6-90f2-22620ddccb0a",
+      "property_type_id": "369f43b0-bc70-5a61-baae-9ab1b8071b84",
+      "source_id": "83bd2502-42f3-52f0-a307-9673eda81e97",
+      "caption": "Synthetic architectural illustration: H-204",
+      "sort_order": 2,
+      "demo_data_only": true
+    },
+    {
+      "id": "b1b5b25a-265b-55e5-93b4-f49d93e9b2d2",
+      "property_type_id": "66666666-6666-4666-8666-666666666661",
+      "source_id": "c2755c5b-2e55-579e-8472-aa020e0f984f",
+      "caption": "Synthetic architectural illustration: H-101",
+      "sort_order": 1,
+      "demo_data_only": true
+    },
+    {
+      "id": "1d536bc4-a281-54a2-8c0a-17d03d67c1e4",
+      "property_type_id": "66666666-6666-4666-8666-666666666661",
+      "source_id": "6dabbf5f-654c-590c-9007-7961b2c427ad",
+      "caption": "Synthetic architectural illustration: H-101",
       "sort_order": 2,
       "demo_data_only": true
     }
