@@ -83,7 +83,8 @@ def _verified_fact_reply(state: dict, plain: str) -> str | None:
     """Repair an unanswered, single-property public fact without extra consent."""
     from . import conversation_context
     question=str(state.get('_active_source_message_text') or '')
-    topic=conversation_context.topic(question)
+    topic=conversation_context.topic(question) or state.get('_pending_factual_topic_override')
+    original_question=state.get('_pending_factual_request_text') or question
     if topic not in ('area','price','bedrooms','bathrooms','kitchen','backyard',
                      'parking','location','availability'):
         return None
@@ -119,7 +120,7 @@ def _verified_fact_reply(state: dict, plain: str) -> str | None:
         r'are you interested|system issue|unable to (?:access|retrieve|confirm)|'
         r'would you like to proceed|still need to confirm)\b',plain,re.I))
     needs_feet=(topic=='area' and bool(re.search(
-        r'\b(?:square footage|square feet|sq\.?\s*ft)\b',question,re.I)) and
+        r'\b(?:square footage|square feet|sq\.?\s*ft)\b',original_question,re.I)) and
         not bool(re.search(r'\b(?:square feet|sq\.?\s*ft)\b',plain,re.I)))
     if plausible.get(topic) and not stalled and not needs_feet:
         return None
