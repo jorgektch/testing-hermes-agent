@@ -52,7 +52,7 @@ def _no_matches_for_state(state: dict) -> str:
     cap=budget.get('maximum_usd')
     beds=bedrooms.get('preferred') or bedrooms.get('minimum')
     requested=(f'{beds}-bedroom house' if beds else 'house')
-    scope=(f' within your \${int(cap):,} budget' if cap is not None else
+    scope=(f' within your ${int(cap):,} budget' if cap is not None else
            ' matching those preferences')
     intro=f"We don't currently have a {requested}{scope}."
     ranked=state.get('_search_out_of_budget_this_turn') or []
@@ -67,8 +67,8 @@ def _no_matches_for_state(state: dict) -> str:
             other_beds=(f'{alternative["bedrooms"]}-bedroom ' if
                         beds and alternative['bedrooms']!=beds else '')
             return (f'{intro} The lowest-priced {other_beds}alternative is '
-                    f'{alternative["unit_id"]} at \${int(alternative["price_usd"]):,}, '
-                    f'\${delta:,} above your limit. '
+                    f'{alternative["unit_id"]} at ${int(alternative["price_usd"]):,}, '
+                    f'${delta:,} above your limit. '
                     'Would you like to see it as an alternative, or keep your budget unchanged?')
     return intro+' Would you like to adjust a criterion?'
 
