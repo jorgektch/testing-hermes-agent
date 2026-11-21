@@ -1,0 +1,10 @@
+feat(hermes): preserve sales context across property searches and visits
+
+- Keep the active visit property independent of past search results and assistant mentions
+- Check exact appointment times across full date ranges and preserve partial time choices
+- Prevent stale date or proposal selection without buyer evidence
+- Offer scoped preference updates and one-off property exceptions without silent profile changes
+- Recover unsupported property and map links without discarding valid conversation turns
+- Display active sales phases, historical searches, and rejected tool outcomes accurately
+- Document Hermes, the LLM, business tools, database persistence, and synthetic sales journey
+- Add anonymized conversation regressions for context, scheduling, media, and preference decisions
