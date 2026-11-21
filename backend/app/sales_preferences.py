@@ -66,7 +66,7 @@ def parse_declarations(message: str) -> dict:
                 numbers = _amounts(text)
                 if numbers:
                     value = numbers[-1]
-                    if re.search(r'\b(?:exact(?:ly)?\s+(?:priced?|price|listing)|price\s+(?:must|should)\s+be\s+exactly)\b', text):
+                    if re.search(r'\b(?:exact(?:ly)?\s+(?:priced?|price|listing)|(?:listing\s+)?price\s+(?:must|should)\s+be\s+exactly|(?:listing\s+)?price\s+exactly|(?:listing\s+)?(?:priced?)\s+at\s+exactly)\b', text):
                         changes['budget'] = {'mode':'exact_price','exact_price_usd':value}
                     elif re.search(r'\b(?:no more than|not more than|up to|at most|maximum|max\b|ceiling|under|less than|don.t want to spend more than|go up to)\b', text):
                         changes['budget'] = {'mode':'cap','maximum_usd':value}
