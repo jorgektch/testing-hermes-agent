@@ -151,16 +151,28 @@ def update_search_preferences(state: dict, **kwargs) -> dict:
     for name,value in kwargs.items():
         group,field=keys[name]
         requested.setdefault(group,{})[field]=value
-    if recognized:
+    if message and requested:
+        # Only declared preference groups may change. Hermes can restate a
+        # saved preference unchanged, but cannot silently revise it.
         for group,passed in list(requested.items()):
             declared=recognized.get(group)
             if declared:
                 for field,value in passed.items():
                     if field in declared and value!=declared[field]:
-                        return {'error':'Preference disagrees with buyer statement.'}
+                        return {'error':'Preference disagrees with buyer statement.',
+                                'error_code':'PREFERENCE_CONFLICT'}
                 requested[group]=declared
-    elif message and requested:
-        return {'error':'Ask the buyer to clarify the exact commercial preference.'}
+                continue
+            current=(_preferences(state).get(group) or {})
+            if all(current.get(field)==value for field,value in passed.items()):
+                requested.pop(group)
+            else:
+                return {'error':'Preference change lacks buyer evidence.',
+                        'error_code':'PREFERENCE_NOT_DECLARED',
+                        'next_action':'Reuse saved preferences; only write explicitly revised criteria.'}
+    if not requested:
+        return {'ok':True,'changed_fields':[],
+                'search_preferences':_preferences(state)}
     result=sales_preferences.apply(state, requested,
         source_message_id=state.get('_active_source_message_id'))
     if not result.get('ok') or not result['changed_fields']:
@@ -326,7 +338,7 @@ def _observe_inbound_context(state: dict, message: str) -> None:
                   (resolution.get('unit_id') and (
                       discussed or exploration_yes or interest_declared or
                       visit_intent or resolution.get('reason') in ('ordinal','comparative'))))
-    if state.get('_turn_intent')=='property_search':
+    if state.get('_turn_intent') in ('property_search','preference_update'):
         state['conversation_phase']='exploration'
         state['stage']='Exploring property alternatives'
         state['visit_planning_paused']=bool(_draft(state).get('unit_id') and
@@ -504,6 +516,10 @@ def end_turn(state: dict, reply: str) -> None:
     state.pop('_turn_intent', None)
     state.pop('_turn_scope', None)
     state.pop('_search_tool_called_this_turn', None)
+    state.pop('_search_result_cache_this_turn', None)
+    state.pop('_search_out_of_budget_this_turn', None)
+    state.pop('_search_nearest_out_of_budget_this_turn', None)
+    state.pop('_automatic_search_recovery', None)
     # A simple explicit single-media offer can be accepted with "yes" next turn.
     # A combined "photos or visit?" question is ambiguous and never preauthorized.
     text = reply.lower()
@@ -794,7 +810,7 @@ def evaluate_properties(state: dict, max_budget_usd: int | None = None,
     out_budget.sort(key=lambda u:(u.get('exceeds_budget_by_usd',0),u['unit_id']))
     state['shortlisted_unit_ids']=[u['unit_id'] for u in primary]
     state['stage']='Properties matched' if primary else 'Exploring alternatives'
-    if state.get('_turn_intent')=='property_search':
+    if state.get('_turn_intent') in ('property_search','preference_update'):
         state['conversation_phase']='exploration'
     record(state,'matching',f"{len(primary)} exact matches; {len(alternatives)} optional alternatives")
     def compact(u):
@@ -825,6 +841,8 @@ def evaluate_properties(state: dict, max_budget_usd: int | None = None,
         'matching_properties':[compact(u) for u in primary],
         'optional_alternatives':optional,
         'out_of_budget_properties':[compact(u) for u in out_budget],
+        'nearest_out_of_budget':compact(out_budget[0]) if out_budget else None,
+        'match_status':'matches' if primary else 'no_matches',
         'other_nonmatching_properties':[compact(u) for u in other],
         'interpreted_purchase_deadline':deadline.isoformat() if deadline else None,
         'timeframe_interpretation':interpretation,
@@ -861,6 +879,12 @@ def search_properties(state: dict, criteria: dict | None = None,
     if scope=='permanent' and search['scope']!='permanent':
         # The model cannot promote exploratory options into permanent facts.
         search['scope']='temporary'
+    fingerprint=json.dumps({
+        'preferences':search['preferences'],'filters':search['filters'],
+        'bedrooms_any':search['bedrooms_any']},sort_keys=True,default=str)
+    cached=state.get('_search_result_cache_this_turn')
+    if cached and cached.get('fingerprint')==fingerprint:
+        return {**copy.deepcopy(cached['result']),'cached':True}
     result=evaluate_properties(
         state,_preferences_override=search['preferences'],
         _filters_override=search['filters'],_bedrooms_any=search['bedrooms_any'])
@@ -872,14 +896,19 @@ def search_properties(state: dict, criteria: dict | None = None,
     state['_turn_intent']='property_search'
     state['_search_tool_called_this_turn']=True
     state['_matching_options_this_turn']=result['matching_properties']
+    state['_search_out_of_budget_this_turn']=result.get('out_of_budget_properties') or []
+    state['_search_nearest_out_of_budget_this_turn']=result.get('nearest_out_of_budget')
     record(state,'search_completed',f"{len(result['matching_properties'])} matches; {session['scope']} scope")
-    return {**result,'scope':search['scope'],'active_search':{
+    response={**result,'scope':search['scope'],'active_search':{
         'revision':session['revision'],'source_message_id':session['source_message_id'],
         'criteria':session['criteria'],'scope':session['scope']},
         'primary_preferences_modified':False,
         'visit_draft_modified':False,
         'note':'This search does not change the appointment draft. The source of '
                'truth remains the server-verified catalogue and buyer constraints.'}
+    state['_search_result_cache_this_turn']={
+        'fingerprint':fingerprint,'result':copy.deepcopy(response)}
+    return response
 
 
 
