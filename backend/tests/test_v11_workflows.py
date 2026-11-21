@@ -95,6 +95,7 @@ def test_asset_discovery_does_not_return_unsolicited_urls():
 
 def test_media_history_only_marks_links_really_sent():
     state=domain.blank_state()
+    domain.begin_turn(state,'Show me photos of H-201')
     media=domain.unit_media('H-201')
     url=media['gallery_url']
     state['_approved_media_urls_this_turn']=[url]
