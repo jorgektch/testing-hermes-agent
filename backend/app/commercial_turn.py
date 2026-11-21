@@ -88,6 +88,11 @@ def scope(message: str, has_primary: bool) -> str:
         return 'permanent'
     if search_request(message) and has_primary:
         return 'temporary'
+    if not search_request(message) and re.search(
+        r"\b(?:i|we)\s+(?:want|need|prefer|require|am looking for)\b.{0,70}"
+        r"\b(?:bedrooms?|beds?|bathrooms?|bath|houses?|budget|parking)\b",
+        message,re.I) and not message.strip().endswith('?'):
+        return 'permanent'
     # Unambiguous direct declarations about the buyer's own budget are not
     # a comparison, even if a bedroom preference was captured earlier.
     if re.search(
