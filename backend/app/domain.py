@@ -276,6 +276,7 @@ def _set_focus(state: dict, code: str, source_message_id: str | None = None) -> 
 def _set_visit_unit(state: dict, code: str) -> None:
     if code not in _units_by_code():
         return
+    state['visit_planning_paused']=False
     draft = _draft(state)
     if draft.get('unit_id') != code:
         draft.update(unit_id=code, date=None, start_time=None,proposal_id=None,status='day_needed')
@@ -333,6 +334,8 @@ def _observe_inbound_context(state: dict, message: str) -> None:
         # A prior request to confirm a visit cannot survive an intervening
         # search as a standing consent. The slot remains a draft.
         state['confirmation_request']=None
+        state['pending_visit_offer']=None
+        return
     elif should_focus and resolution.get('unit_id'):
         _set_focus(state,resolution['unit_id'])
         state['conversation_phase']='property_details' if discussed or exploration_yes else state.get('conversation_phase','discovery')
