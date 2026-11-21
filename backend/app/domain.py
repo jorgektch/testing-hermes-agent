@@ -765,6 +765,32 @@ def unit_media(unit_id: str) -> dict:
     }
 
 
+
+def list_unit_assets(state: dict, unit_id: str) -> dict:
+    """Read approved media availability without authorizing any URLs to send."""
+    unit = _units_by_code().get(unit_id)
+    if not unit:
+        return {'error':'Unknown or unpublished house.'}
+    if state.get('_active_source_message_id') and (
+        unit_id!=_focus(state).get('unit_id') and not _buyer_mentioned_house(state,unit_id)):
+        return {'error':'Ask which property the buyer is referring to.'}
+    media=unit_media(unit_id)
+    if media.get('error'):
+        return media
+    previous=(state.get('shared_media') or {}).get(unit_id) or {}
+    sent=set(previous.get('document_urls_sent') or [])
+    return {'ok':True,'unit_id':unit_id,
+            'gallery':{'available':media['gallery_available'],
+                       'image_count':media['image_count'],
+                       'already_shared':bool(previous.get('gallery_sent'))},
+            'documents':[{'type':x['type'],'title':x['title'],
+                          'already_shared':x['url'] in sent}
+                         for x in media['documents']],
+            'note':'Discovery returns NO URLs. Only deliver requested, approved assets; '
+                   'a property fact sheet is not an architectural floor plan.'}
+
+
+
 def date_input(raw: str | None) -> str | None:
     if not raw:
         return None
