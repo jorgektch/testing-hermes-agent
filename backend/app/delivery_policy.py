@@ -54,7 +54,7 @@ def _pending_visit_recap(state: dict) -> str:
     except (ValueError,TypeError):
         formatted=clock
     return (f'For {name}, you selected {day} at {formatted} (Lima). '
-            'It is not booked yet. Reply "Yes, I confirm" to reserve the visit.')
+            'It is not booked yet. Can you reply "Yes, I confirm" to reserve the visit?')
 
 
 def _record_sent_media(state: dict, message: str) -> None:
