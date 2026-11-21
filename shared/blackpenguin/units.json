@@ -24,7 +24,17 @@
       "demo_data_only": true,
       "is_publishable": true,
       "available_from": null,
-      "source_reference": "New synthetic house-only inventory"
+      "source_reference": "New synthetic house-only inventory",
+      "location": {
+        "address": "Exact street address not supplied (fictional house)",
+        "district": null,
+        "city": "Lima",
+        "country": "Peru",
+        "verification_status": "synthetic",
+        "map_scope": "city_reference_only",
+        "maps_url": "https://www.google.com/maps/search/?api=1&query=Lima%2C%20Peru",
+        "note": "Illustrative city search; NOT an exact property location or an actual place to visit."
+      }
     },
     {
       "id": "5ef1980b-a96e-5ff8-8a51-2b36193f3423",
@@ -46,7 +56,17 @@
       "demo_data_only": true,
       "is_publishable": true,
       "available_from": "2026-12-15",
-      "source_reference": "New synthetic house-only inventory"
+      "source_reference": "New synthetic house-only inventory",
+      "location": {
+        "address": "Exact street address not supplied (fictional house)",
+        "district": null,
+        "city": "Lima",
+        "country": "Peru",
+        "verification_status": "synthetic",
+        "map_scope": "city_reference_only",
+        "maps_url": "https://www.google.com/maps/search/?api=1&query=Lima%2C%20Peru",
+        "note": "Illustrative city search; NOT an exact property location or an actual place to visit."
+      }
     },
     {
       "id": "77777777-7777-4777-8777-777777777771",
@@ -67,7 +87,17 @@
       "features": [],
       "demo_data_only": true,
       "is_publishable": true,
-      "available_from": null
+      "available_from": null,
+      "location": {
+        "address": "Exact street address not supplied (fictional house)",
+        "district": null,
+        "city": "Lima",
+        "country": "Peru",
+        "verification_status": "synthetic",
+        "map_scope": "city_reference_only",
+        "maps_url": "https://www.google.com/maps/search/?api=1&query=Lima%2C%20Peru",
+        "note": "Illustrative city search; NOT an exact property location or an actual place to visit."
+      }
     },
     {
       "id": "77777777-7777-4777-8777-777777777772",
@@ -94,7 +124,17 @@
       ],
       "demo_data_only": true,
       "is_publishable": false,
-      "available_from": null
+      "available_from": null,
+      "location": {
+        "address": "Exact street address not supplied (fictional house)",
+        "district": null,
+        "city": "Lima",
+        "country": "Peru",
+        "verification_status": "synthetic",
+        "map_scope": "city_reference_only",
+        "maps_url": "https://www.google.com/maps/search/?api=1&query=Lima%2C%20Peru",
+        "note": "Illustrative city search; NOT an exact property location or an actual place to visit."
+      }
     },
     {
       "id": "b6699608-a056-5db0-877e-e3a54117245d",
@@ -115,7 +155,17 @@
       "available_from": "2027-03-01",
       "is_publishable": true,
       "features": [],
-      "demo_data_only": true
+      "demo_data_only": true,
+      "location": {
+        "address": "Exact street address not supplied (fictional house)",
+        "district": null,
+        "city": "Lima",
+        "country": "Peru",
+        "verification_status": "synthetic",
+        "map_scope": "city_reference_only",
+        "maps_url": "https://www.google.com/maps/search/?api=1&query=Lima%2C%20Peru",
+        "note": "Illustrative city search; NOT an exact property location or an actual place to visit."
+      }
     }
   ],
   "inventory_events": [
