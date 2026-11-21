@@ -9,12 +9,14 @@ import SalesCalendar from './calendar';
 type Unit={location?:{address?:string;city?:string;country?:string;district?:string|null;maps_url?:string|null;map_scope?:string;verification_status?:string;note?:string};unit_id:string;blackpenguin_unit_id:string;property_type_id:string;property_type:'Apartment'|'House';commercial_name:string;property_type_code?:string;property_type_description?:string;bedrooms:number;bathrooms:number;area_sqm:number;lot_area_m2?:number|null;floor_number?:number|null;price_usd:number;currency?:string;available_from_date:string;status:string;confirmed_features?:Record<string,string|number|boolean>;highlights:string[];media:{gallery_urls:string[];gallery_url:string|null;floorplan_brochure_pdf:string|null;documents:{type:string;title:string;url:string;scope:'unit';unit_id:string}[]};demo_inventory_last_updated_at?:string;publication_status?:string;inventory_is_live?:boolean;phase_id?:string;phase_name?:string;property_model?:{model_name:string;code:string;bedrooms?:number;bathrooms?:number;built_area_min_m2?:number;built_area_max_m2?:number;lot_area_min_m2?:number;lot_area_max_m2?:number;total_units?:number;review_status?:string;inventory_updated_at?:string;verified_type_features?:{feature_key:string;verification_status:string;value_text?:string;value_number?:string;value_bool?:boolean}[]};};
 type Catalog={project_info:{name:string;developer:string;project_type?:string;development_status?:string;short_description?:string;long_description?:string;project_code?:string;value_proposition:string;amenities:string[];phase_names?:string[];published_revision?:number;inventory_summary?:{total_units:number;available_units:number;reserved_units:number};general_brochure_pdf:string;location:{street_address:string;city:string;country:string;timezone?:string}};properties:Unit[]};
 type SearchPreferences={revision:number;budget:{mode:string;minimum_usd:number|null;maximum_usd:number|null;target_usd:number|null;exact_price_usd:number|null;currency?:string};bedrooms:{mode:string;minimum:number|null;maximum:number|null;preferred:number|null};last_source_message_id?:string|null};
+type PropertyFilters={revision:number;min_area_sqm:number|null;max_area_sqm:number|null;min_bathrooms:number|null;max_bathrooms:number|null;min_parking_spaces:number|null;kitchen_layout:string|null;private_backyard:boolean|null;relative_price_lt:number|null;relative_price_gt:number|null;source_unit_id:string|null;source_message_id:string|null};
+type AnsweredTopic={unit_id:string;topic:string;source_message_id:string|null;reply_message_id:string;recorded_at:string};
 type Fact={id:string;field:string;value:unknown;status:string;source:string;evidence?:string;captured_at?:string;source_ref?:{message_id?:string}};
 type Booking={meeting_id:string;advisor_name:string|null;unit_id:string|null;date:string;start_time:string;end_time:string;status:string;visit_location?:{label:string;address?:string;maps_url:string|null;verification_status:string}};
-type State={search_preferences?:SearchPreferences;search_preferences_history?:{prior:SearchPreferences;changes:unknown;source_message_id?:string;changed_at?:string}[];confirmation_request?:{unit_id:string;date:string;start_time:string}|null;last_offered_date?:string|null;shared_media?:Record<string,{gallery_sent?:boolean;document_urls_sent?:string[]}>;conversation_focus?:{project_id?:string;unit_id?:string|null;ambiguous?:boolean};visit_draft?:{unit_id?:string|null;date?:string|null;start_time?:string|null;status?:string};last_slot_search?:{result_code?:string;requested?:string;date?:string};exploring_unit_id?:string|null;ui_fact_evidence?:Record<string,Evidence>;tool_observations?:ToolObservation[];lead:{first_name:string|null;last_name:string|null;phone:string|null;email:string|null;budget_usd:number|null;purchase_timeframe:string|null;property_type:string|null;min_bedrooms:number|null;interest_unit_id:string|null};stage:string;turn_count:number;shortlisted_unit_ids:string[];booked_visits:Booking[];property_interests?:{unit_id:string;status:string;source_message_id?:string}[];booking_proposal?:{proposal_id:string;status:string;expires_at:string;options:{date:string;start_time:string}[]}|null;bp_episode?:{leads:{lead_profile_data:{sales_profile:{current:Record<string,Fact>}}}}};
+type State={property_filters?:PropertyFilters;conversation_phase?:string;last_presented_units?:string[];answered_topics?:AnsweredTopic[];search_preferences?:SearchPreferences;search_preferences_history?:{prior:SearchPreferences;changes:unknown;source_message_id?:string;changed_at?:string}[];confirmation_request?:{unit_id:string;date:string;start_time:string}|null;last_offered_date?:string|null;shared_media?:Record<string,{gallery_sent?:boolean;document_urls_sent?:string[]}>;conversation_focus?:{project_id?:string;unit_id?:string|null;ambiguous?:boolean};visit_draft?:{unit_id?:string|null;date?:string|null;start_time?:string|null;status?:string};last_slot_search?:{result_code?:string;requested?:string;date?:string};exploring_unit_id?:string|null;ui_fact_evidence?:Record<string,Evidence>;tool_observations?:ToolObservation[];lead:{first_name:string|null;last_name:string|null;phone:string|null;email:string|null;budget_usd:number|null;purchase_timeframe:string|null;property_type:string|null;min_bedrooms:number|null;interest_unit_id:string|null};stage:string;turn_count:number;shortlisted_unit_ids:string[];booked_visits:Booking[];property_interests?:{unit_id:string;status:string;source_message_id?:string}[];booking_proposal?:{proposal_id:string;status:string;expires_at:string;options:{date:string;start_time:string}[]}|null;bp_episode?:{leads:{lead_profile_data:{sales_profile:{current:Record<string,Fact>}}}}};
 type Evidence={source_message_id?:string;message_id?:string;captured_at?:string;evidence?:string;source?:string};
-type ToolObservation={tool:string;status:string;fields:string[];timestamp:string;message_id?:string;error_code?:string|null};
-type ProfilePreview={lead:State['lead'];stage:string;search_preferences?:SearchPreferences;recent_preferences_changes?:State['search_preferences_history'];confirmation_request?:State['confirmation_request'];last_offered_date?:string|null;conversation_focus?:State['conversation_focus'];visit_draft?:State['visit_draft'];last_slot_search?:State['last_slot_search'];exploring_unit_id?:string|null;property_interests:NonNullable<State['property_interests']>;facts:Record<string,Fact>;ui_fact_evidence:Record<string,Evidence>;tool_observations:ToolObservation[]};
+type ToolObservation={tool:string;status:string;fields:string[];timestamp:string;message_id?:string;error_code?:string|null;reason?:string|null;next_action?:string|null};
+type ProfilePreview={lead:State['lead'];stage:string;property_filters?:PropertyFilters;conversation_phase?:string;last_presented_units?:string[];answered_topics?:AnsweredTopic[];search_preferences?:SearchPreferences;recent_preferences_changes?:State['search_preferences_history'];confirmation_request?:State['confirmation_request'];last_offered_date?:string|null;conversation_focus?:State['conversation_focus'];visit_draft?:State['visit_draft'];last_slot_search?:State['last_slot_search'];exploring_unit_id?:string|null;property_interests:NonNullable<State['property_interests']>;facts:Record<string,Fact>;ui_fact_evidence:Record<string,Evidence>;tool_observations:ToolObservation[]};
 type Message={id:string;role:'user'|'assistant';content:string;created_at:string;sequence_number?:number};
 type Lead={id:string;conversation_id:string;first_name:string;last_name:string;email:string;phone:string;updated_at:string;created_at:string;revision:number;state:State;messages:Message[]};
 type Summary={id:string;conversation_id:string;first_name:string;last_name:string;updated_at:string;last_message:string|null};
@@ -140,6 +142,9 @@ export default function Page(){
   const preferences=liveProfile?.search_preferences||state?.search_preferences;
   const budgetPrefs=preferences?.budget;
   const bedroomPrefs=preferences?.bedrooms;
+  const propertyFilters=liveProfile?.property_filters||state?.property_filters;
+  const answeredTopics=liveProfile?.answered_topics||state?.answered_topics||[];
+  const conversationPhase=liveProfile?.conversation_phase||state?.conversation_phase||'discovery';
   const focusCalendarDate=(liveProfile?.last_slot_search?.date||state?.last_slot_search?.date||visitDraft?.date||null);
   const profileFacts=liveProfile?.facts||state?.bp_episode?.leads?.lead_profile_data?.sales_profile?.current||{};
   const profileEvidence=liveProfile?.ui_fact_evidence||state?.ui_fact_evidence||{};
@@ -317,12 +322,29 @@ export default function Page(){
                 bedroomPrefs.mode==='exact'? `Exactly ${bedroomPrefs.preferred}`:
                 `Prefer ${bedroomPrefs.preferred}`
               ):viewLead?.min_bedrooms} evidence={profileFacts.bedrooms?{...profileFacts.bedrooms,source_message_id:profileFacts.bedrooms.source_ref?.message_id}:undefined} timeZone={timeZone} onLocate={locateMessage}/>
+              {propertyFilters&&propertyFilters.revision>0&&<div className="commercial-refinements">
+                <small>Active search refinements · revision {propertyFilters.revision}</small>
+                {propertyFilters.min_area_sqm!=null&&<div className="state-kv"><span>Minimum built area</span><strong>{Math.ceil(propertyFilters.min_area_sqm)} m²</strong></div>}
+                {propertyFilters.max_area_sqm!=null&&<div className="state-kv"><span>Maximum built area</span><strong>{Math.floor(propertyFilters.max_area_sqm)} m²</strong></div>}
+                {propertyFilters.min_bathrooms!=null&&<div className="state-kv"><span>Minimum bathrooms</span><strong>{propertyFilters.min_bathrooms}</strong></div>}
+                {propertyFilters.max_bathrooms!=null&&<div className="state-kv"><span>Maximum bathrooms</span><strong>{propertyFilters.max_bathrooms}</strong></div>}
+                {propertyFilters.min_parking_spaces!=null&&<div className="state-kv"><span>Parking spaces</span><strong>{propertyFilters.min_parking_spaces}+</strong></div>}
+                {propertyFilters.kitchen_layout&&<div className="state-kv"><span>Kitchen</span><strong>{propertyFilters.kitchen_layout}</strong></div>}
+                {propertyFilters.relative_price_lt!=null&&<div className="state-kv"><span>Less expensive than</span><strong>{usd.format(propertyFilters.relative_price_lt)}</strong></div>}
+                {propertyFilters.relative_price_gt!=null&&<div className="state-kv"><span>More expensive than</span><strong>{usd.format(propertyFilters.relative_price_gt)}</strong></div>}
+              </div>}
               <small className="stage-label">{liveProfile?.stage||state.stage}</small>
             </section>
             <section className="state-section"><h3>Project focus</h3>
               <div className="state-kv"><span>Project</span><strong>{catalog?.project_info.name||'Not available'}</strong></div>
               <div className="state-kv"><span>Operation</span><strong>House sale</strong></div>
+              <div className="state-kv"><span>Active activity</span><strong>{conversationPhase.replaceAll('_',' ')}</strong></div>
               <div className="state-kv"><span>Exploring</span><strong>{conversationFocus?.unit_id??liveProfile?.exploring_unit_id??state.exploring_unit_id??'Not yet chosen'}</strong></div>
+              {answeredTopics.length>0&&<details className="inspector"><summary><Check size={12}/> Answered property questions ({answeredTopics.length})</summary>
+                {answeredTopics.slice(-8).map((x,i)=><div className="state-kv" key={x.reply_message_id+':'+i}>
+                  <span>{x.unit_id} · {x.topic}</span><strong><Check size={12}/> Sent</strong>
+                </div>)}
+              </details>}
               <div className="state-kv"><span>House selected for visit</span><strong>{visitDraft?.unit_id||'Not selected'}</strong></div>
               {visitDraft?.date&&<div className="state-kv"><span>Requested visit date</span><strong>{visitDraft.date}</strong></div>}
               {visitDraft?.start_time&&<div className="state-kv"><span>Requested visit time</span><strong>{visitDraft.start_time}</strong></div>}
@@ -340,13 +362,17 @@ export default function Page(){
               {observations.slice(-4).map((o,i)=><div className="agent-work-row" key={o.timestamp+':'+i}>
                 {o.status==='rejected'?<Info size={13} className="agent-work-error"/>:liveProfile?<Info size={13} className="agent-work-pending"/>:<Check size={13} className="agent-work-done"/>}
                 <div><strong>{o.tool.replaceAll('_',' ')}</strong>
-                  <small>{o.error_code||o.status}{o.fields.length?' · '+o.fields.join(', '):''}</small></div>
+                  <small>{o.error_code||o.status}{o.fields.length?' · '+o.fields.join(', '):''}</small>
+                  {o.status==='rejected'&&o.reason&&<small title={o.next_action||undefined}>{o.reason}</small>}</div>
               </div>)}
               <small className="muted">Green checks indicate persisted, successful operations. Provisional steps are not yet saved.</small>
             </section>}
             {observations.length>0&&<details className="inspector"><summary>Full agent tool trace ({observations.length})</summary>
               {observations.slice(-8).map((o,i)=><div className="evidence-line" key={`${o.timestamp}-${i}`}>
-                <strong>{o.tool} · {o.status}{o.error_code?` · ${o.error_code}`:''}</strong><small>{o.fields.join(', ')} · {formatChatTimestamp(o.timestamp,timeZone)}</small>
+                <strong>{o.tool} · {o.status}{o.error_code?` · ${o.error_code}`:''}</strong>
+                <small>{o.fields.join(', ')} · {formatChatTimestamp(o.timestamp,timeZone)}</small>
+                {o.reason&&<small>{o.reason}</small>}
+                {o.next_action&&<small>Recovery: {o.next_action}</small>}
               </div>)}
             </details>}
             <section className="state-section"><h3>Appointment</h3>{currentBooking?<div className="appointment-card"><div className="status-line"><Check size={13}/> Confirmed · Demo only</div><strong>{currentBooking.date} · {currentBooking.start_time}–{currentBooking.end_time}</strong><small>{currentBooking.advisor_name||'Advisor assignment pending'}</small><small>{currentBooking.unit_id||'Unlinked legacy appointment'}</small>{currentBooking.visit_location&&<small>{currentBooking.visit_location.address} · Fictional demo location</small>}</div>:<div className="no-appointment">No confirmed appointment</div>}{state.booking_proposal?.status==='offered'&&<div className="offer-summary"><small>Offered · not booked · expires {new Date(state.booking_proposal.expires_at).toLocaleTimeString()}</small>{state.booking_proposal.options.map(opt=><div key={`${opt.date}-${opt.start_time}`}>{opt.date} {opt.start_time}</div>)}</div>}{state.booked_visits.filter(b=>b.status!=='confirmed').length>0&&<details className="inspector"><summary>Previous visits</summary>{state.booked_visits.filter(b=>b.status!=='confirmed').map(b=><div className="state-kv" key={b.meeting_id}><span>{b.date}</span><strong>{b.status}</strong></div>)}</details>}</section>
