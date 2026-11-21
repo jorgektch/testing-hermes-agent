@@ -178,6 +178,8 @@ def build(allow_missing_assets: bool = False) -> dict:
             'available_from_date':u.get('available_from') or 'Immediate',
             'status':'Available',  # marketing badge is derived after unit-level inventory checks
             'highlights':_highlights(typed),
+            # Only documented unit-level synthetic location, not an invented house pin.
+            'location':u.get('location'),
             'media':{
                 **by_unit.get(u['id'],{'gallery_urls':[],'floorplan_brochure_pdf':None,'documents':[]}),
                 # Relative path is portable across Vercel environments; the
