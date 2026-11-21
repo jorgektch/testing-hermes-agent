@@ -59,7 +59,7 @@ def _db_path() -> str:
 def connect():
     remote = os.environ.get('TURSO_DATABASE_URL', '').strip()
     if remote:
-        token = os.environ.get('TURSO_AUTH_TOKEN', '').strip()
+        os.environ.get("TURSO_DATABASE_TURSO_AUTH_TOKEN", "").strip() or os.environ.get("TURSO_AUTH_TOKEN", "").strip()
         if not token:
             raise RuntimeError('TURSO_AUTH_TOKEN is required with TURSO_DATABASE_URL')
         import libsql  # installed with backend/requirements.txt; never put token in the URL
