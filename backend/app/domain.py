@@ -412,7 +412,7 @@ def end_turn(state: dict, reply: str) -> None:
     draft=_draft(state)
     if (draft.get('status')=='awaiting_confirmation' and
             re.search(r'\b(?:confirm|accept|reserve|book\s+it)\b',reply,re.I) and
-            '?' in reply):
+            ('?' in reply or re.search(r'\b(?:reply|please confirm|can you confirm)\b',reply,re.I))):
         state['confirmation_request']={
             'unit_id':draft['unit_id'],'date':draft['date'],
             'start_time':draft['start_time'],
@@ -1080,6 +1080,7 @@ def select_visit_time(state: dict, proposal_id: str, date_str: str, start_time: 
     draft.update(unit_id=proposal['selected_unit_id'], date=parsed_day,
                  start_time=parsed_time,proposal_id=proposal_id,status='awaiting_confirmation')
     state['confirmation_request']=None
+    state['bp_episode']['sales_dialogue_states']['state_json']['booking_proposal'] = copy.deepcopy(proposal)
     state['bp_episode']['sales_dialogue_states']['state_json']['visit_draft'] = copy.deepcopy(draft)
     record(state, 'hour_selected', f'Lead chose {parsed_day} {parsed_time} for {proposal["selected_unit_id"]}')
     return {'ok': True, 'date': parsed_day, 'start_time': parsed_time,
