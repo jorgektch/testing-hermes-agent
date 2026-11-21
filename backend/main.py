@@ -244,9 +244,9 @@ def _begin_turn(state: dict, message: str) -> None:
     # Read-only prefetch of the single, contextually resolved public house
     # record. This is NOT buyer interest, booking consent or media approval.
     # The full facts are fed to Hermes; its final answer is still validated.
-    from app import conversation_context
+    from app import commercial_turn
     ref=state.get('_turn_property_resolution') or {}
-    intent=conversation_context.topic(message)
+    intent=commercial_turn.core_query_topic(message)
     if (ref.get('unit_id') and not ref.get('ambiguous') and
             (intent or state.get('_pending_factual_topic_override')) in
             ('area','price','bedrooms','bathrooms','kitchen',
