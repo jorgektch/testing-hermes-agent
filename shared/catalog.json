@@ -5,6 +5,9 @@
     "name": "Residencial Jardines del Sol",
     "project_type": "mixed_residential",
     "development_status": "completed",
+    "short_description": "Casas y departamentos terminados con espacios verdes compartidos.",
+    "long_description": "A fictional completed residential development featuring houses and apartments, for simulated onsite sales visits.",
+    "project_code": "CR-LIMA-001",
     "published_revision": 8,
     "phase_names": [
       "Etapa 1"
@@ -45,6 +48,37 @@
       "property_type_code": "DEPTO-2D",
       "property_type_description": "Completed apartment with a private terrace (synthetic).",
       "phase_id": "55555555-5555-4555-8555-555555555555",
+      "phase_name": "Etapa 1",
+      "property_model": {
+        "model_name": "Garden-View Two-Bedroom Apartment",
+        "code": "DEPTO-2D",
+        "bedrooms": 2,
+        "bathrooms": 2,
+        "built_area_min_m2": 92,
+        "built_area_max_m2": 92,
+        "lot_area_min_m2": null,
+        "lot_area_max_m2": null,
+        "total_units": 1,
+        "review_status": "confirmed",
+        "inventory_updated_at": "2026-11-18T15:00:00Z",
+        "verified_type_features": [
+          {
+            "feature_key": "kitchen_layout",
+            "value_text": "closed",
+            "verification_status": "confirmed"
+          },
+          {
+            "feature_key": "private_terrace",
+            "value_bool": true,
+            "verification_status": "confirmed"
+          },
+          {
+            "feature_key": "parking_spaces",
+            "value_number": "1",
+            "verification_status": "confirmed"
+          }
+        ]
+      },
       "floor_number": 2,
       "lot_area_m2": null,
       "currency": "USD",
@@ -84,6 +118,32 @@
       "property_type_code": "DEPTO-3D",
       "property_type_description": "Completed three-bedroom apartment with large windows and a balcony (synthetic).",
       "phase_id": "55555555-5555-4555-8555-555555555555",
+      "phase_name": "Etapa 1",
+      "property_model": {
+        "model_name": "Three-Bedroom Family Apartment",
+        "code": "DEPTO-3D",
+        "bedrooms": 3,
+        "bathrooms": 2,
+        "built_area_min_m2": 112,
+        "built_area_max_m2": 112,
+        "lot_area_min_m2": null,
+        "lot_area_max_m2": null,
+        "total_units": 1,
+        "review_status": "confirmed",
+        "inventory_updated_at": "2026-11-20T00:00:00Z",
+        "verified_type_features": [
+          {
+            "feature_key": "kitchen_layout",
+            "value_text": "open",
+            "verification_status": "confirmed"
+          },
+          {
+            "feature_key": "parking_spaces",
+            "value_number": "1",
+            "verification_status": "confirmed"
+          }
+        ]
+      },
       "floor_number": 2,
       "lot_area_m2": null,
       "currency": "USD",
@@ -121,6 +181,42 @@
       "property_type_code": "CASA-3D",
       "property_type_description": "Completed three-bedroom house with a private backyard and an open kitchen (synthetic).",
       "phase_id": "55555555-5555-4555-8555-555555555555",
+      "phase_name": "Etapa 1",
+      "property_model": {
+        "model_name": "Three-Bedroom Family House",
+        "code": "CASA-3D",
+        "bedrooms": 3,
+        "bathrooms": 2.5,
+        "built_area_min_m2": 150,
+        "built_area_max_m2": 165,
+        "lot_area_min_m2": 180,
+        "lot_area_max_m2": 210,
+        "total_units": 2,
+        "review_status": "confirmed",
+        "inventory_updated_at": "2026-11-18T15:00:00Z",
+        "verified_type_features": [
+          {
+            "feature_key": "kitchen_layout",
+            "value_text": "open",
+            "verification_status": "confirmed"
+          },
+          {
+            "feature_key": "private_backyard",
+            "value_bool": true,
+            "verification_status": "confirmed"
+          },
+          {
+            "feature_key": "backyard_area_m2",
+            "value_number": "25.0",
+            "verification_status": "confirmed"
+          },
+          {
+            "feature_key": "parking_spaces",
+            "value_number": "2",
+            "verification_status": "confirmed"
+          }
+        ]
+      },
       "floor_number": 1,
       "lot_area_m2": 180.0,
       "currency": "USD",
@@ -159,6 +255,37 @@
       "property_type_code": "CASA-4D",
       "property_type_description": "Completed four-bedroom family house with a private garden (synthetic).",
       "phase_id": "55555555-5555-4555-8555-555555555555",
+      "phase_name": "Etapa 1",
+      "property_model": {
+        "model_name": "Four-Bedroom Premium House",
+        "code": "CASA-4D",
+        "bedrooms": 4,
+        "bathrooms": 3,
+        "built_area_min_m2": 215,
+        "built_area_max_m2": 215,
+        "lot_area_min_m2": 275,
+        "lot_area_max_m2": 275,
+        "total_units": 1,
+        "review_status": "confirmed",
+        "inventory_updated_at": "2026-11-20T00:00:00Z",
+        "verified_type_features": [
+          {
+            "feature_key": "kitchen_layout",
+            "value_text": "open",
+            "verification_status": "confirmed"
+          },
+          {
+            "feature_key": "private_backyard",
+            "value_bool": true,
+            "verification_status": "confirmed"
+          },
+          {
+            "feature_key": "parking_spaces",
+            "value_number": "2",
+            "verification_status": "confirmed"
+          }
+        ]
+      },
       "floor_number": 1,
       "lot_area_m2": 275.0,
       "currency": "USD",

@@ -108,6 +108,7 @@ def build(allow_missing_assets: bool = False) -> dict:
     project_features=_confirmed_feature_items(bp['project_features'])
     # Project amenities come only from approved/onboarded project profile, not unit features.
     amenities=fields.get('amenities') if profile.get('field_states_sample',{}).get('amenities',{}).get('status')=='confirmed' else []
+    phase_by_id={p['id']:p['name'] for p in bp['phases']}
     properties=[]
     for u in bp['units']:
         if u.get('project_id')!=project['id'] or u.get('status')!='available' or u.get('is_publishable') is not True:
@@ -128,6 +129,20 @@ def build(allow_missing_assets: bool = False) -> dict:
             'property_type_code':typ['code'],
             'property_type_description':typ.get('description'),
             'phase_id':u.get('phase_id'),
+            'phase_name':phase_by_id.get(u.get('phase_id')),
+            'property_model':{
+                'model_name':typ['name'], 'code':typ['code'],
+                'bedrooms':typ.get('bedrooms'), 'bathrooms':typ.get('bathrooms'),
+                'built_area_min_m2':typ.get('built_area_min_m2'),
+                'built_area_max_m2':typ.get('built_area_max_m2'),
+                'lot_area_min_m2':typ.get('lot_area_min_m2'),
+                'lot_area_max_m2':typ.get('lot_area_max_m2'),
+                'total_units':typ.get('total_units'),
+                'review_status':typ.get('review_status'),
+                'inventory_updated_at':typ.get('inventory_updated_at'),
+                'verified_type_features':[f for f in typ.get('features',[])
+                                          if f.get('verification_status')=='confirmed'],
+            },
             'floor_number':u.get('floor_number'),
             'lot_area_m2':float(u['lot_area_m2']) if u.get('lot_area_m2') is not None else None,
             'currency':u.get('currency'),
@@ -162,6 +177,9 @@ def build(allow_missing_assets: bool = False) -> dict:
         'name':project['name'],
         'project_type':project.get('project_type'),
         'development_status':project.get('development_status'),
+        'short_description':project.get('short_description'),
+        'long_description':project.get('long_description'),
+        'project_code':project.get('code'),
         'published_revision':profile.get('published_revision'),
         'phase_names':[p['name'] for p in bp['phases']],
         'inventory_summary':{'total_units':len(bp['units']),

@@ -71,9 +71,9 @@ def _exception_intervals(user_id: str, day: date, data: dict, today: date) -> tu
     return extra,blocked
 
 
-def _occupied_intervals(user_id: str, state: dict, data: dict, today: date, buffer: int) -> list[tuple[datetime,datetime]]:
+def _occupied_intervals(user_id: str, state: dict, data: dict, today: date, buffer: int, extra_occupied: dict | None = None) -> list[tuple[datetime,datetime]]:
     spans=[]
-    for meeting in _read('meetings.json')['demo_existing_meetings']:
+    for meeting in ([] if extra_occupied is not None else _read('meetings.json')['demo_existing_meetings']):
         if meeting['assigned_sales_user_id'] != user_id or meeting['status'] not in ACTIVE_STATUSES:
             continue
         start=instant(offset_day(meeting['day_offset'],today),meeting['local_start_time'])
@@ -85,6 +85,8 @@ def _occupied_intervals(user_id: str, state: dict, data: dict, today: date, buff
         if start.tzinfo is None:start=start.replace(tzinfo=UTC)
         start=start.astimezone(UTC)
         spans.append((start,start+timedelta(minutes=meeting['duration_minutes']+meeting.get('buffer_after_minutes',buffer))))
+    if extra_occupied is not None:
+        spans.extend(extra_occupied.get(user_id, []))
     return spans
 
 
@@ -97,7 +99,8 @@ def eligible_users(project_id: str) -> list[dict]:
 
 
 def available_slots(state: dict, *, date_filter: date | None = None, now: datetime | None = None,
-                    limit: int | None = None) -> list[dict]:
+                    limit: int | None = None, extra_occupied: dict | None = None,
+                    include_today: bool = False) -> list[dict]:
     """Only project-eligible advisors, global occupancy, and explicit blocked exceptions.
 
     A search window can be every 30m even though each accepted meeting blocks 60m.
@@ -106,12 +109,12 @@ def available_slots(state: dict, *, date_filter: date | None = None, now: dateti
     pol=policy(); data=availability(); today=(now or local_now()).astimezone(TZ).date()
     now_utc=(now or local_now()).astimezone(UTC)
     end_offset=pol['booking_horizon_days']
-    dates=[today+timedelta(days=i) for i in range(1,end_offset+1)]
+    dates=[today+timedelta(days=i) for i in range(0 if include_today else 1,end_offset+1)]
     if date_filter:
         if date_filter not in dates:return []
         dates=[date_filter]
     users=eligible_users(pol['project_id'])
-    occupied={u['id']:_occupied_intervals(u['id'],state,data,today,pol['buffer_after_minutes']) for u in users}
+    occupied={u['id']:_occupied_intervals(u['id'],state,data,today,pol['buffer_after_minutes'],extra_occupied) for u in users}
     needed=timedelta(minutes=pol['visit_duration_minutes']+pol['buffer_after_minutes'])
     increment=timedelta(minutes=pol['slot_search_step_minutes'])
     choices=[]

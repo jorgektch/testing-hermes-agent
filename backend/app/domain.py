@@ -82,6 +82,7 @@ def blank_state() -> dict:
         'shortlisted_unit_ids': [],
         'booked_visits': [],
         'booking_proposal': None,
+        'property_interests': [],
         'events': [],
         'turn_count': 0,
         'bp_episode': bp,
@@ -190,6 +191,9 @@ def _capture_bp_facts(state: dict, changed: dict) -> None:
             sales['history'].append(previous)
             sales['history']=sales['history'][-100:]
         sales['current'][field]=fact
+    # Distinguish expressed interest from general discussion or model recommendations.
+    if changed.get('interest_unit_id'):
+        track_property_interest(state, changed['interest_unit_id'], status='interested')
     # The legacy facts mirror exists in the BP contract for compatibility.
     sales['facts'] = {k:v['value'] for k,v in sales['current'].items() if v['status']=='declared'}
     qualification=record_['lead_profile_data']['active_qualification']
@@ -372,7 +376,7 @@ def date_input(raw: str | None) -> str | None:
         raise ValueError('Use YYYY-MM-DD, today or tomorrow.') from exc
 
 
-def slots(state: dict, date_str: str | None = None) -> dict:
+def slots(state: dict, date_str: str | None = None, *, extra_occupied: dict | None = None) -> dict:
     """Publish three expiring options from a fresh calculation (NOT a hold).
 
     Offer = client-visible proposal evidence, NOT a meeting. A confirmed
@@ -384,7 +388,7 @@ def slots(state: dict, date_str: str | None = None) -> dict:
     except ValueError as exc:
         return {'error':str(exc)}
     policy=scheduling.policy()
-    options=scheduling.pick_diverse_slots(scheduling.available_slots(state,date_filter=day),
+    options=scheduling.pick_diverse_slots(scheduling.available_slots(state,date_filter=day,extra_occupied=extra_occupied),
                                          policy['maximum_offered_options'])
     proposal_id=str(uuid.uuid4())
     expires_at=(datetime.now(timezone.utc)+timedelta(minutes=policy['offer_expiration_minutes'])).isoformat()
@@ -403,6 +407,29 @@ def slots(state: dict, date_str: str | None = None) -> dict:
             'visit_duration_minutes':policy['visit_duration_minutes'],
             'buffer_minutes':policy['buffer_after_minutes'],
             'notice':'Proposed times are NOT held. They expire and must be rechecked. No external calendar is connected.'}
+
+
+def track_property_interest(state: dict, unit_id: str, status: str = 'discussed') -> dict:
+    """Track a named unit with message provenance, never infer buying intent."""
+    known = {u['unit_id'] for u in read_catalog()['properties']}
+    if unit_id not in known:
+        return {'error': 'Unknown or non-public residential unit.'}
+    if status not in ('discussed', 'considering', 'interested'):
+        return {'error': 'Invalid interest status.'}
+    existing = state.setdefault('property_interests', [])
+    # A mention cannot downgrade a prior explicit interest.
+    rank = {'discussed': 0, 'considering': 1, 'interested': 2}
+    previous = next((x for x in existing if x['unit_id'] == unit_id), None)
+    if previous is not None:
+        if rank[status] >= rank[previous['status']]:
+            previous.update(status=status, source_message_id=state.get('_active_source_message_id'))
+    else:
+        existing.append({'unit_id': unit_id, 'status': status,
+                         'source_message_id': state.get('_active_source_message_id')})
+    if status == 'interested':
+        state['lead']['interest_unit_id'] = unit_id
+    return {'ok': True, 'property_interests': existing,
+            'active_unit_id': state['lead'].get('interest_unit_id')}
 
 
 def update_lead(state: dict, **kwargs: Any) -> dict:
@@ -501,7 +528,7 @@ def _explicit_lead_confirmation(state: dict) -> bool:
 def book_visit(state: dict, first_name: str, last_name: str, email: str,
                phone: str, advisor_id: str, date_str: str,
                start_time: str, proposal_id: str, unit_id: str | None = None,
-               replaces_meeting_id: str | None = None) -> dict:
+               replaces_meeting_id: str | None = None, extra_occupied: dict | None = None) -> dict:
     """Confirm an offered slot with explicit user consent and immediate recheck.
 
     This stays an isolated simulation, NOT a multi-user transactional booking.
@@ -531,7 +558,7 @@ def book_visit(state: dict, first_name: str, last_name: str, email: str,
                  and opt['date']==day and opt['start_time']==start_time),None)
     if option is None:
         return {'error':'This option was not offered. Request fresh availability.'}
-    available=scheduling.available_slots(state,date_filter=date.fromisoformat(day))
+    available=scheduling.available_slots(state,date_filter=date.fromisoformat(day),extra_occupied=extra_occupied)
     if not any(opt['advisor_id']==advisor_id and opt['date']==day and opt['start_time']==start_time for opt in available):
         return {'error':'This slot is no longer available. Search again.'}
     units={u['unit_id']:u for u in read_catalog()['properties']}
@@ -626,7 +653,7 @@ def cancel_visit(state: dict, meeting_id: str, reason: str | None = None) -> dic
 
 def reschedule_visit(state: dict, original_meeting_id: str, first_name: str, last_name: str,
                      email: str, phone: str, advisor_id: str, date_str: str, start_time: str,
-                     proposal_id: str, unit_id: str | None = None) -> dict:
+                     proposal_id: str, unit_id: str | None = None, *, extra_occupied: dict | None = None) -> dict:
     """New meeting replaces previous: old Meeting is cancelled, history preserved."""
     bp=state['bp_episode']
     old=next((m for m in bp['meetings'] if m['id']==original_meeting_id and m['status']=='confirmed'
@@ -636,7 +663,7 @@ def reschedule_visit(state: dict, original_meeting_id: str, first_name: str, las
         prior=next((b for b in state['booked_visits'] if b['meeting_id']==original_meeting_id),None)
         unit_id=prior['unit_id'] if prior else None
     new=book_visit(state,first_name,last_name,email,phone,advisor_id,date_str,start_time,
-                   proposal_id,unit_id=unit_id,replaces_meeting_id=original_meeting_id)
+                   proposal_id,unit_id=unit_id,replaces_meeting_id=original_meeting_id,extra_occupied=extra_occupied)
     if 'error' in new:return new
     old['status']='cancelled';old['confirmation_status']='rescheduled'
     prior=next((b for b in state['booked_visits'] if b['meeting_id']==original_meeting_id),None)

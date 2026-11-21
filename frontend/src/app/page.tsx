@@ -1,323 +1,136 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  Activity, ArrowLeft, ArrowRight, ArrowUp, BadgeCheck, Bath, BedDouble,
-  Bot, CalendarDays, Check, CheckCircle2, ChevronDown, ChevronRight, Clock3,
-  FileText, House, Images, Info, KeyRound, Layers3, LockKeyhole,
-  MapPin, MessageCircle, ShieldCheck, SlidersHorizontal, Sparkles, Square, Terminal,
-  Users, X,
-} from 'lucide-react';
+import {useCallback,useEffect,useRef,useState} from 'react';
+import {ArrowDown,ArrowUp,Bath,BedDouble,Building2,CalendarDays,Check,ChevronDown,ChevronRight,FileText,Images,Info,LockKeyhole,LogOut,MapPin,MessageCircle,Plus,ShieldCheck,Square,Trash2,UserRound,Users,X} from 'lucide-react';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import SalesCalendar from './calendar';
 
-type Unit = {
-  unit_id: string; property_type: 'Apartment' | 'House'; commercial_name: string;
-  bedrooms: number; bathrooms: number; area_sqm: number; price_usd: number;
-  available_from_date: string; status: string; highlights: string[];
-  media: { gallery_urls: string[]; floorplan_brochure_pdf: string | null };
-  property_type_code?: string; property_type_description?: string; floor_number?: number | null;
-  lot_area_m2?: number | null; currency?: string; publication_status?: string;
-  confirmed_features?: Record<string, string | number | boolean>; demo_inventory_last_updated_at?: string;
-
-};
-type Catalog = {
-  project_info: { name: string; developer: string; value_proposition: string;
-    project_type?: string; development_status?: string; published_revision?: number;
-    phase_names?: string[]; inventory_summary?: { total_units: number; available_units: number; reserved_units: number };
-    amenities: string[]; general_brochure_pdf: string;
-    location: { street_address: string; district: string; city: string; country: string }; };
-  properties: Unit[];
-  sales_advisors: { advisor_id: string; name: string; specialty: string }[];
-};
-type Lead = {
-  first_name: string | null; last_name: string | null; email: string | null; phone: string | null;
-  budget_usd: number | null; purchase_timeframe: string | null; property_type: string | null;
-  min_bedrooms: number | null; interest_unit_id: string | null;
-};
-type Booking = { booking_id: string; advisor_name: string; unit_id: string | null; status?: string; date: string;
-  start_time: string; end_time: string; simulation_only: boolean };
-type BpFact = { field: string; value: unknown; status: string; source: string; evidence: string; captured_at: string; source_ref?: { message_id?: string } };
-type Profile = {
-  bp_episode?: { leads: { lead_profile_data: { sales_profile: { current: Record<string, BpFact>; history: BpFact[] } } };
-    meetings?: Record<string, unknown>[]; sales_dialogue_states?: { state_json: Record<string,unknown> } };
-  lead: Lead; stage: string; shortlisted_unit_ids: string[]; booked_visits: Booking[];
-  booking_proposal?: { proposal_id: string; status: string; expires_at: string; options: { advisor_id: string; advisor_name: string; date: string; start_time: string; visit_end_time: string; buffer_end_time: string }[] } | null;
-  events: { id: string; event: string; label: string; timestamp: string }[];
-  turn_count: number;
-};
-type Line = { role: 'user' | 'assistant'; content: string; id: string };
-type Session = { sessionId: string; token: string; state: Profile;
-  history: Record<string, unknown>[]; messages: Line[] };
-
-const STORE_KEY = 'hermes-sales-lab-session-bp-v3';
-const ACCESS_KEY = 'hermes-sales-lab-access';
-const MAX_TURNS = 14;
-const usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
-const promptExamples = [
-  'My budget is $260,000, and I want to buy within two months.',
-  'I need at least two bedrooms. What can you recommend?',
-  'Could you show me the gallery and floor plan for A-201?',
-];
-const greeting: Line = { role: 'assistant', id: 'greeting', content:
-  "Hi there! Welcome to Residencial Jardines del Sol. 👋 I'm Ava, your AI sales advisor. I'd love to help you find the right home. What budget are you considering, and when are you hoping to buy?" };
-const initial: Profile = {
-  lead: { first_name: null, last_name: null, email: null, phone: null, budget_usd: null,
-    purchase_timeframe: null, property_type: null, min_bedrooms: null, interest_unit_id: null },
-  stage: 'New Meta lead', shortlisted_unit_ids: [], booked_visits: [], events: [], turn_count: 0,
-};
-const leadFields: { key: keyof Lead; label: string; fallback: string; format?: (v: any) => string }[] = [
-  { key: 'budget_usd', label: 'Maximum budget', fallback: 'Not captured', format: (v) => usd.format(v) },
-  { key: 'purchase_timeframe', label: 'Purchase timeline', fallback: 'Not captured' },
-  { key: 'property_type', label: 'Property type', fallback: 'Not specified' },
-  { key: 'min_bedrooms', label: 'Bedrooms', fallback: 'Not specified', format: (v) => `${v}+ bedrooms` },
-  { key: 'interest_unit_id', label: 'Interested unit', fallback: 'Not selected' },
-  { key: 'first_name', label: 'First name', fallback: 'Not captured' },
-  { key: 'last_name', label: 'Last name', fallback: 'Not captured' },
-  { key: 'email', label: 'Email address', fallback: 'Not captured' },
-  { key: 'phone', label: 'Phone number', fallback: 'Not captured' },
-];
-
-function displayReady(v: string) { return v === 'Immediate' ? 'Ready now' : v.split('-').reverse().join('/'); }
-function linkify(message: string) {
-  const parts = message.split(/(https?:\/\/[^\s<>"']+|\/demo-assets\/[A-Za-z0-9._-]+)/g);
-  return parts.map((part, i) => /^(https?:\/\/|\/demo-assets\/)/.test(part)
-    ? <a key={i} href={part} className="message-link" target="_blank" rel="noopener noreferrer">{part}<ArrowUp size={12}/></a>
-    : <span key={i}>{part}</span>);
-}
-function eventTime(t: string) {
-  try { return new Date(t).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }); }
-  catch { return ''; }
-}
-
-export default function Page() {
-  const [catalog, setCatalog] = useState<Catalog | null>(null);
-  const [catalogError, setCatalogError] = useState('');
-  const [filter, setFilter] = useState<'All' | 'Apartment' | 'House'>('All');
-  const [selected, setSelected] = useState<Unit | null>(null);
-  const [photo, setPhoto] = useState(0);
-  const [showProject, setShowProject] = useState(false);
-  const [session, setSession] = useState<Session | null>(null);
-  const [messages, setMessages] = useState<Line[]>([greeting]);
-  const [draft, setDraft] = useState('');
-  const [accessCode, setAccessCode] = useState('');
-  const [showAccess, setShowAccess] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const [profileFlash, setProfileFlash] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const modalRef = useRef<HTMLDivElement>(null);
-  const state = session?.state || initial;
-  const filled = Object.values(state.lead).filter((x) => x !== null && x !== '').length;
-  const book = [...state.booked_visits].reverse().find((v) => v.status === 'confirmed');
-  const previousVisits = state.booked_visits.filter((v) => v.status !== 'confirmed');
-  const project = catalog?.project_info;
-  const properties = catalog?.properties.filter((u) => filter === 'All' || u.property_type === filter) || [];
-
-  useEffect(() => {
-    const saved = window.sessionStorage.getItem(STORE_KEY);
-    if (saved) {
-      try { const data = JSON.parse(saved) as Session;
-        if (data.sessionId && data.token && data.state) {
-          setSession(data); setMessages(data.messages || [greeting]);
-        }
-      } catch { window.sessionStorage.removeItem(STORE_KEY); }
-    }
-    setAccessCode(window.sessionStorage.getItem(ACCESS_KEY) || '');
-    fetch('/api/catalog').then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-      .then(setCatalog).catch((e: Error) => setCatalogError(e.message));
-  }, []);
-  useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }); }, [messages, busy]);
-  useEffect(() => {
-    if (!selected) return;
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const oldOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    modalRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { event.preventDefault(); setSelected(null); return; }
-      if (event.key !== 'Tab') return;
-      const nodes = Array.from(modalRef.current?.querySelectorAll<HTMLElement>('button,a[href],input,textarea,[tabindex]:not([tabindex="-1"])') ?? []).filter(el => !el.hasAttribute('disabled'));
-      if (!nodes.length) return;
-      const first=nodes[0], last=nodes[nodes.length-1];
-      if (event.shiftKey && document.activeElement === first) {event.preventDefault(); last.focus();}
-      else if (!event.shiftKey && document.activeElement === last) {event.preventDefault(); first.focus();}
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => { document.removeEventListener('keydown',onKeyDown); document.body.style.overflow=oldOverflow; previousFocus?.focus(); };
-  }, [selected]);
-
-  const save = useCallback((v: Session) => {
-    window.sessionStorage.setItem(STORE_KEY, JSON.stringify(v)); setSession(v);
-  }, []);
-  const send = useCallback(async () => {
-    const message = draft.trim();
-    if (!message || busy || state.turn_count >= MAX_TURNS) return;
-    setBusy(true); setError(''); setDraft('');
-    const next: Line[] = [...messages, { role: 'user', content: message, id: `user-${Date.now()}` }];
-    setMessages(next);
-    try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (accessCode) headers['X-Demo-Access-Code'] = accessCode;
-      let current = session;
-      if (!current) {
-        const res = await fetch('/api/session', { method: 'POST', headers, body: '{}' });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Unable to start session');
-        current = { sessionId: data.session_id, token: data.token, state: data.state,
-          history: [], messages: [greeting] };
-      }
-      const res = await fetch('/api/chat', { method: 'POST', headers,
-        body: JSON.stringify({ token: current.token, message }) });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Unable to contact the AI agent');
-      const updated: Line[] = [...next, { role: 'assistant', content: data.reply, id: `ai-${Date.now()}` }];
-      setMessages(updated);
-      save({ sessionId: current.sessionId, token: data.token, state: data.state,
-        history: [], messages: updated });
-      setProfileFlash(true); window.setTimeout(() => setProfileFlash(false), 1200);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unexpected error');
-      setDraft(message); setMessages(messages);
-    } finally { setBusy(false); }
-  }, [accessCode, busy, draft, messages, save, session, state.turn_count]);
-
-  return <div className="app-shell">
-    <aside className="shell-sidebar" aria-label="Demo navigation">
-      <div className="sidebar-wordmark"><span>black</span><strong>penguin</strong><small>.ai</small></div>
-      <div className="sidebar-divider"/>
-      <div className="sidebar-section">RESEARCH WORKSPACE</div>
-      <nav className="sidebar-nav">
-        <a href="#overview"><span className="material-symbols-outlined">space_dashboard</span>Overview</a>
-        <a href="#inventory"><span className="material-symbols-outlined">apartment</span>Property inventory</a>
-        <a href="#conversation" className="sidebar-active"><span className="material-symbols-outlined">forum</span>Hermes agent</a>
-        <a href="#lead-state"><span className="material-symbols-outlined">person_search</span>Lead intelligence</a>
-      </nav>
-      <div className="sidebar-section sidebar-section-second">EXPERIMENT</div>
-      <div className="sidebar-support"><span className="material-symbols-outlined">science</span><span>Hermes Agent Lab<small>Independent research demo</small></span></div>
-      <div className="sidebar-bottom"><div className="sidebar-profile-icon">H</div><span>Sandbox session<small>Synthetic data · No CRM</small></span><span className="material-symbols-outlined">verified_user</span></div>
-    </aside>
-    <div className="shell-main">
-    <header className="global-header">
-      <div className="brand"><div className="brand-logo"><span className="material-symbols-outlined">neurology</span></div><div><strong>Hermes <span>Agent Lab</span></strong><small>REAL ESTATE SALES EXPERIMENT</small></div></div>
-      <div className="header-right"><div className="model-badge"><span className="green-dot"/> OpenRouter <span className="badge-separator"/> gpt-4o-mini</div>
-        <button className="access-button" onClick={() => setShowAccess(!showAccess)}><LockKeyhole size={13}/> {accessCode ? 'Access set' : 'Demo access'} <ChevronDown size={14}/></button>
-        <div className="avatar-small">AI</div></div>
-      {showAccess && <div className="access-dialog"><div className="eyebrow">PRIVATE DEMO ACCESS</div>
-        <p>Enter the optional visitor code. Your OpenRouter API key never enters the browser.</p>
-        <div className="access-control"><KeyRound size={15}/><input type="password" value={accessCode} onChange={(e) => setAccessCode(e.target.value)} placeholder="Access code"/><button onClick={() => {window.sessionStorage.setItem(ACCESS_KEY, accessCode); setShowAccess(false);}}>Save</button></div>
-      </div>}
-    </header>
-
-    <section className="hero-heading" id="overview"><div><div className="eyebrow">INTERACTIVE PLAYGROUND <span>/</span> SIMULATION 001</div>
-      <h1>Real estate sales. <em>Agent intelligence.</em></h1>
-      <p>Explore a BlackPenguin-inspired property catalog while Nous Research Hermes qualifies a synthetic lead and proposes a showroom visit.</p></div>
-      <div className="experiment-status"><span className="exp-icon"><Activity size={19}/></span><div><strong>Experiment live</strong><small>Lead journey · 45-min visit</small></div></div>
-    </section>
-
-    <main className="dashboard">
-      <section className="inventory-column" id="inventory">
-        <div className="column-heading"><div><span className="eyebrow">01 / KNOWLEDGE BASE</span><h2>Property inventory <span className="counter">{catalog?.properties.length ?? 0}</span></h2></div><span className="column-pill"><Layers3 size={13}/> Synthetic data</span></div>
-        <div className="project-banner"><div className="project-super"><div className="building-icon"><House size={20}/></div><span>RESIDENTIAL COMMUNITY</span></div><h3>{project?.name || 'Residencial Jardines del Sol'}</h3>
-          <p className="map-caption"><MapPin size={14}/> {project ? `${project.location.city}, ${project.location.country}` : 'Lima, Peru'}</p>
-          <div className="hero-metrics"><div><strong>{catalog?.properties.length ?? 0}</strong><span>Available homes</span></div><div><strong>{project?.amenities.length ?? 0}</strong><span>Amenities</span></div><div><strong>{catalog?.sales_advisors.length ?? 0}</strong><span>Sales advisors</span></div></div>
-          <button className="project-details" onClick={() => setShowProject(!showProject)}>Explore project details <ChevronRight size={16}/></button>
-        </div>
-        {showProject && project && <div className="project-expanded"><p>{project.value_proposition}</p><div className="eyebrow">PROJECT AMENITIES</div>
-          <div className="amenities-list">{project.amenities.map((a) => <span key={a}><Check size={12}/>{a}</span>)}</div>
-          <small>{project.location.street_address} · {project.developer}</small>
-          <div className="project-inspection"><div><strong>Development</strong><span>{project.development_status || 'Not specified'}</span></div><div><strong>Project structure</strong><span>{project.phase_names?.join(', ') || 'Not specified'}</span></div><div><strong>Published revision</strong><span>v{project.published_revision ?? '—'} · synthetic</span></div><div><strong>Inventory</strong><span>{project.inventory_summary?.available_units ?? '—'} available / {project.inventory_summary?.reserved_units ?? '—'} reserved</span></div></div>
-          <a href={project.general_brochure_pdf} target="_blank" rel="noopener noreferrer"><FileText size={14}/> View demo project brochure</a>
-        </div>}
-        <div className="inventory-toolbar"><div><SlidersHorizontal size={14}/> AVAILABLE UNITS <span>{properties.length} properties</span></div>
-          <div className="filters">{(['All', 'Apartment', 'House'] as const).map((t) => <button key={t} className={filter === t ? 'selected' : ''} onClick={() => setFilter(t)}>{t === 'All' ? 'All' : t === 'Apartment' ? 'Apartments' : 'Houses'}</button>)}</div></div>
-        {catalogError && <div className="error-alert">Could not load inventory: {catalogError}</div>}
-        <div className="property-grid">{properties.map((u) => {
-          const isMatch = state.shortlisted_unit_ids.includes(u.unit_id);
-          return <button key={u.unit_id} className={`unit-card ${isMatch ? 'unit-matched' : ''}`} onClick={() => {setSelected(u);setPhoto(0);}}>
-            <div className={`unit-image ${!u.media.gallery_urls.length ? 'image-unavailable' : ''}`}>
-              {u.media.gallery_urls.length ? <img src={u.media.gallery_urls[0]} alt={`Synthetic concept for ${u.commercial_name}`}/> : <div className="placeholder"><Images size={26}/><span>No image gallery</span></div>}
-              <span className={`unit-status ${u.status === 'Last Unit' ? 'status-last' : ''}`}>{u.status}</span>
-              {isMatch && <span className="unit-match"><Sparkles size={12}/> Lead match</span>}
-            </div>
-            <div className="unit-content"><div className="unit-meta"><span>{u.property_type}</span><span>{u.unit_id}</span></div><h3>{u.commercial_name}</h3>
-              <div className="unit-stats"><span><BedDouble size={14}/>{u.bedrooms} beds</span><span><Bath size={14}/>{u.bathrooms} baths</span><span><Square size={14}/>{u.area_sqm} m²</span></div>
-              <div className="unit-bottom"><div><strong>{usd.format(u.price_usd)}</strong><small><Clock3 size={11}/>{displayReady(u.available_from_date)}</small></div><span className="open-unit"><ArrowUp size={16}/></span></div>
-            </div>
-          </button>;
-        })}</div>
-        <div className="team-panel"><div className="eyebrow"><Users size={15}/> HUMAN SALES ADVISORS</div><div className="team-list">{catalog?.sales_advisors.map((a, i) => <div key={a.advisor_id} className="advisor-item"><div className={`advisor-initial advisor-${i}`}>{a.name.split(' ').map((s) => s[0]).join('')}</div><div><strong>{a.name}</strong><small>{a.specialty}</small></div></div>)}</div></div>
-        <p className="inventory-warning"><Info size={12}/> Fictional project, inventory, prices, advisors and media.</p>
-      </section>
-
-      <section className="chat-column" id="conversation"><div className="column-heading"><div><span className="eyebrow">02 / CONVERSATION</span><h2>Live sales chat <span className="heading-live"/></h2></div><span className="column-pill"><MessageCircle size={13}/> English</span></div>
-        <div className="agent-line"><div className="agent-icon"><Bot size={22}/></div><div><strong>Ava <span>AI Sales Advisor</span></strong><small>Powered by Nous Research Hermes Agent</small></div><span className="agent-online"><span className="green-dot"/> Available</span></div>
-        <div className="chat-body" ref={scrollRef}><div className="chat-begin"><span>YOUR INTERACTIVE LEAD SESSION</span><small>Each message invokes the Hermes conversation runtime.</small></div>
-          {messages.map((m) => <div key={m.id} className={`chat-message ${m.role === 'user' ? 'from-lead' : 'from-agent'}`}>
-            {m.role === 'assistant' && <div className="chat-avatar"><Bot size={16}/></div>}
-            <div className="chat-bubble">{linkify(m.content)}</div></div>)}
-          {busy && <div className="chat-message from-agent"><div className="chat-avatar"><Bot size={16}/></div><div className="chat-bubble typing"><i/><i/><i/></div></div>}
-          {book && <div className="confirmation-card"><BadgeCheck size={19}/><div><strong>Simulated visit confirmed</strong><small>{book.date}, {book.start_time} · {book.advisor_name}</small></div></div>}
-        </div>
-        <div className="compose-area">{error && <div className="error-alert chat-error"><Info size={15}/>{error}<button aria-label="Dismiss" onClick={() => setError('')}><X size={14}/></button></div>}
-          {state.turn_count === 0 && <div className="quick-prompts">{promptExamples.map((p, i) => <button key={p} onClick={() => setDraft(p)}><Sparkles size={11}/>{['Share my budget','Find a property','See photos'][i]}</button>)}</div>}
-          <div className="composer"><textarea value={draft} disabled={busy || state.turn_count >= MAX_TURNS} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) {e.preventDefault();void send();}}} rows={2} placeholder={state.turn_count >= MAX_TURNS ? 'This demo session is complete.' : 'Ask about a property, budget, or visit...'}/><button aria-label="Send message" disabled={!draft.trim() || busy || state.turn_count >= MAX_TURNS} onClick={() => void send()}><ArrowUp size={19}/></button></div>
-          <div className="composer-foot"><span><LockKeyhole size={11}/> Single-session demo · synthetic data only</span><span>{state.turn_count}/{MAX_TURNS} turns</span></div>
-        </div>
-      </section>
-
-      <aside id="lead-state" className={`state-column ${profileFlash ? 'state-flash' : ''}`}><div className="column-heading"><div><span className="eyebrow">03 / LIVE STATE</span><h2>Lead intelligence</h2></div><span className="live-pill"><span className="green-dot"/> Live</span></div>
-        <div className="tracking-summary"><div className="tracking-value">{filled}<span>/9</span></div><div><strong>Profile completeness</strong><small>Updated by agent tool calls</small><div className="progress-bar"><span style={{width: `${(filled / 9) * 100}%`}}/></div></div></div>
-        <div className="state-body"><div className="state-section-title">CONVERSATION STAGE <Activity size={14}/></div>
-          <div className="stage-summary"><span><Activity size={16}/></span><div><small>CURRENT STAGE</small><strong>{state.stage}</strong></div></div>
-          <div className="state-section-title">LEAD PROFILE <span>{filled} of 9</span></div>
-          <div className="profile-fields">{leadFields.map((f) => {
-            const value = state.lead[f.key]; const hasValue = value !== null && value !== '';
-            return <div key={f.key} className={`profile-field ${hasValue ? 'captured' : ''}`}><div className="field-check">{hasValue ? <Check size={12}/> : <i/>}</div><div><small>{f.label}</small><strong>{hasValue ? f.format ? f.format(value) : String(value) : f.fallback}</strong></div></div>;
-          })}</div>
-          <div className="state-section-title">BLACKPENGUIN · EVIDENCE <span>{Object.keys(state.bp_episode?.leads.lead_profile_data.sales_profile.current ?? {}).length}</span></div>
-          {Object.entries(state.bp_episode?.leads.lead_profile_data.sales_profile.current ?? {}).length ? <div className="events">{Object.entries(state.bp_episode?.leads.lead_profile_data.sales_profile.current ?? {}).slice(-6).map(([key, fact]) => <div key={key}><i/><span><strong>{key}: {String(fact.value)}</strong><small>{fact.status} · {fact.source}</small><small title={fact.evidence}>Evidence: {fact.evidence.slice(0, 120)}</small><small className="evidence-ref">Message {fact.source_ref?.message_id?.slice(0, 8) || 'not referenced'} · {eventTime(fact.captured_at)}</small></span></div>)}</div> : <p className="muted-message">No declared commercial facts yet. Captured statements include provenance and evidence.</p>}
-          <div className="state-section-title">MATCHED PROPERTIES <span>{state.shortlisted_unit_ids.length}</span></div>
-          {state.shortlisted_unit_ids.length ? <div className="shortlist">{state.shortlisted_unit_ids.map((id) => { const u = catalog?.properties.find((x) => x.unit_id === id); return <button key={id} onClick={() => { if (u) {setSelected(u); setPhoto(0);} }}><House size={16}/><span><strong>{id}</strong><small>{u?.commercial_name}</small></span><ChevronRight size={14}/></button>; })}</div> : <p className="muted-message">Qualify the lead in chat to see matching homes here.</p>}
-          <div className="state-section-title">ONSITE VISIT <CalendarDays size={14}/></div>
-          {book ? <div className="booked-visit"><span><CheckCircle2 size={16}/> Simulated reservation</span><strong>{book.date} · {book.start_time}–{book.end_time}</strong><small>{book.advisor_name} · {book.unit_id || 'Project-wide visit'}</small><small>{book.booking_id}</small></div> : <div className="no-booking"><CalendarDays size={23}/><strong>No active appointment</strong><small>45-minute visit · 15-minute buffer</small></div>}
-          {previousVisits.length ? <div className="visit-history"><small>VISIT HISTORY</small>{previousVisits.map(v => <div key={v.booking_id}><span>{v.date} · {v.start_time}</span><strong>{v.status || 'previous'}</strong></div>)}</div> : null}
-          {state.booking_proposal?.options?.length && !book ? <div className="offer-panel"><div className="state-section-title offer-heading">OFFERED SLOTS <Clock3 size={14}/></div><small>Not held · Revalidated on confirmation</small>{state.booking_proposal.options.map((opt) => <div className="offer-row" key={`${opt.advisor_id}-${opt.date}-${opt.start_time}`}><CalendarDays size={14}/><span><strong>{opt.date} · {opt.start_time}–{opt.visit_end_time}</strong><small>{opt.advisor_name} · Buffer until {opt.buffer_end_time}</small></span></div>)}<small className="expires-note">Offer expires {eventTime(state.booking_proposal.expires_at)} · Demo only</small></div> : null}
-          <div className="state-section-title">TOOL ACTIVITY <Terminal size={14}/></div>
-          {state.events.length ? <div className="events">{[...state.events].reverse().slice(0, 7).map((e) => <div key={e.id}><i/><span><strong>{e.label}</strong><small>{e.event.replace('_',' ')} · {eventTime(e.timestamp)}</small></span></div>)}</div> : <p className="muted-message">Tool activity will appear here after new lead facts or property matches.</p>}
-          <details className="raw-inspector"><summary><span className="material-symbols-outlined">data_object</span> Inspect structured state</summary><pre>{JSON.stringify({
-            lead: state.lead,
-            sales_profile_current: state.bp_episode?.leads.lead_profile_data.sales_profile.current ?? {},
-            dialogue: state.bp_episode?.sales_dialogue_states?.state_json ?? {},
-            booking_proposal: state.booking_proposal ?? null,
-            meetings: state.bp_episode?.meetings ?? [],
-          },null,2)}</pre></details>
-        </div>
-        <div className="state-foot"><ShieldCheck size={15}/> Signed state, synthetic data · no real appointments</div>
-      </aside>
-    </main>
-    <footer className="page-footer"><span>HERMES AGENT LAB · Independent experiment using Nous Research Hermes</span><span>Next.js / FastAPI / OpenRouter / Vercel</span></footer>
-
-    {selected && <div className="modal-overlay" onMouseDown={(e) => {if (e.target === e.currentTarget) setSelected(null);}}><div className="property-modal" ref={modalRef} role="dialog" aria-modal="true" aria-label={`Details for ${selected.commercial_name}`}>
-      <div className="modal-heading"><span className="eyebrow">PROPERTY RECORD / {selected.unit_id}</span><button aria-label="Close dialog" onClick={() => setSelected(null)}><X size={19}/></button></div>
-      <div className="modal-art">{selected.media.gallery_urls.length ? <img src={selected.media.gallery_urls[photo]} alt="Synthetic property concept illustration"/> : <div className="modal-no-gallery"><Images size={35}/> No gallery available</div>}
-        {selected.media.gallery_urls.length > 1 && <div className="photo-controls"><button onClick={() => setPhoto((photo - 1 + selected.media.gallery_urls.length) % selected.media.gallery_urls.length)}><ArrowLeft size={15}/></button><span>{photo + 1}/{selected.media.gallery_urls.length}</span><button onClick={() => setPhoto((photo + 1) % selected.media.gallery_urls.length)}><ArrowRight size={15}/></button></div>}</div>
-      <div className="modal-main"><div className="modal-kicker"><span>{selected.property_type} · {selected.status}</span><span>{selected.unit_id}</span></div><h2>{selected.commercial_name}</h2><p className="modal-price">{usd.format(selected.price_usd)}</p>
-        <div className="modal-facts"><div><BedDouble size={17}/><strong>{selected.bedrooms}</strong><small>Bedrooms</small></div><div><Bath size={17}/><strong>{selected.bathrooms}</strong><small>Bathrooms</small></div><div><Square size={17}/><strong>{selected.area_sqm} m²</strong><small>Built area</small></div><div><Clock3 size={17}/><strong>{displayReady(selected.available_from_date)}</strong><small>Available</small></div></div>
-        <div className="modal-description">{selected.property_type_description || 'No additional type description provided.'}</div>
-        <div className="property-detail-grid">
-          <div><small>TYPE CODE</small><strong>{selected.property_type_code || '—'}</strong></div>
-          <div><small>FLOOR</small><strong>{selected.floor_number ?? 'Not specified'}</strong></div>
-          <div><small>LOT AREA</small><strong>{selected.lot_area_m2 == null ? 'Not applicable' : `${selected.lot_area_m2} m²`}</strong></div>
-          <div><small>CURRENCY</small><strong>{selected.currency ?? 'USD'}</strong></div>
-          <div><small>INVENTORY VERIFIED</small><strong>{selected.demo_inventory_last_updated_at?.slice(0,10) ?? 'Unknown'} · demo</strong></div>
-          <div><small>PUBLICATION</small><strong>Approved in synthetic catalog</strong></div>
-        </div>
-        <div className="modal-label">VERIFIED PROPERTY FEATURES</div>
-        <div className="feature-inspector">{Object.entries(selected.confirmed_features || {}).length ? Object.entries(selected.confirmed_features || {}).map(([key,value]) => <div key={key}><span>{key.replaceAll('_',' ')}</span><strong>{typeof value === 'boolean' ? (value ? 'Yes' : 'No') : String(value)}</strong></div>) : <small>No confirmed type-level features.</small>}</div>
-        <div className="modal-label">HIGHLIGHTS</div><div className="modal-chips">{selected.highlights.map((x) => <span key={x}><CheckCircle2 size={13}/>{x}</span>)}</div>
-        <div className="modal-label">MEDIA</div><div className="modal-links"><div><Images size={16}/><span>Gallery</span><strong>{selected.media.gallery_urls.length ? `${selected.media.gallery_urls.length} images` : 'Not available'}</strong></div><div><FileText size={16}/><span>Unit PDF</span>{selected.media.floorplan_brochure_pdf ? <a href={selected.media.floorplan_brochure_pdf} target="_blank" rel="noopener noreferrer">Open PDF <ArrowUp size={13}/></a> : <strong>Not available</strong>}</div></div>
-        <button className="ask-about" onClick={() => {setDraft(`I would like to learn more about ${selected.unit_id}.`);setSelected(null);}}><MessageCircle size={17}/> Ask Ava about this home <ArrowRight size={16}/></button>
-        <small className="modal-disclaimer">All project and home information is fictional. Illustrations and PDFs are synthetic demo assets.</small>
-      </div></div></div>}
+type Unit={unit_id:string;blackpenguin_unit_id:string;property_type_id:string;property_type:'Apartment'|'House';commercial_name:string;property_type_code?:string;property_type_description?:string;bedrooms:number;bathrooms:number;area_sqm:number;lot_area_m2?:number|null;floor_number?:number|null;price_usd:number;currency?:string;available_from_date:string;status:string;confirmed_features?:Record<string,string|number|boolean>;highlights:string[];media:{gallery_urls:string[];floorplan_brochure_pdf:string|null};demo_inventory_last_updated_at?:string;publication_status?:string;inventory_is_live?:boolean;phase_id?:string;phase_name?:string;property_model?:{model_name:string;code:string;bedrooms?:number;bathrooms?:number;built_area_min_m2?:number;built_area_max_m2?:number;lot_area_min_m2?:number;lot_area_max_m2?:number;total_units?:number;review_status?:string;inventory_updated_at?:string;verified_type_features?:{feature_key:string;verification_status:string;value_text?:string;value_number?:string;value_bool?:boolean}[]};};
+type Catalog={project_info:{name:string;developer:string;project_type?:string;development_status?:string;short_description?:string;long_description?:string;project_code?:string;value_proposition:string;amenities:string[];phase_names?:string[];published_revision?:number;inventory_summary?:{total_units:number;available_units:number;reserved_units:number};general_brochure_pdf:string;location:{street_address:string;city:string;country:string;timezone?:string}};properties:Unit[]};
+type Fact={id:string;field:string;value:unknown;status:string;source:string;evidence?:string;captured_at?:string;source_ref?:{message_id?:string}};
+type Booking={meeting_id:string;advisor_name:string;unit_id:string|null;date:string;start_time:string;end_time:string;status:string};
+type State={lead:{first_name:string|null;last_name:string|null;phone:string|null;email:string|null;budget_usd:number|null;purchase_timeframe:string|null;property_type:string|null;min_bedrooms:number|null;interest_unit_id:string|null};stage:string;turn_count:number;shortlisted_unit_ids:string[];booked_visits:Booking[];property_interests?:{unit_id:string;status:string;source_message_id?:string}[];booking_proposal?:{proposal_id:string;status:string;expires_at:string;options:{advisor_id:string;advisor_name:string;date:string;start_time:string;visit_end_time:string;buffer_end_time:string}[]}|null;bp_episode?:{leads:{lead_profile_data:{sales_profile:{current:Record<string,Fact>}}}}};
+type Message={id:string;role:'user'|'assistant';content:string;created_at:string};
+type Lead={id:string;conversation_id:string;first_name:string;last_name:string;email:string;phone:string;updated_at:string;created_at:string;revision:number;state:State;messages:Message[]};
+type Summary={id:string;conversation_id:string;first_name:string;last_name:string;updated_at:string;last_message:string|null};
+type Session={id:string;role:'administrator'|'evaluator';owner_id:string;csrf_token:string};
+const usd=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0});
+const MAX_TURNS=14;
+const EMPTY_FORM={first_name:'',last_name:'',phone:'',email:''};
+function dateText(s:string){return s==='Immediate'?'Ready now':s||'Not specified';}
+function Field({label,value}:{label:string;value:string|number|boolean|null|undefined}){const str=value==null?'Not specified':typeof value==='boolean'?(value?'Yes':'No'):String(value);return <div className="detail-field"><small>{label}</small><strong>{str}</strong></div>}
+function safeLink(href:string|undefined){return !!href&&/^\/demo-assets\/[A-Za-z0-9_.-]+\.(svg|pdf)$/i.test(href)}
+function ChatMarkdown({text}:{text:string}){return <Markdown remarkPlugins={[remarkGfm]} components={{a:({href,children})=>safeLink(href)?<a href={href} target="_blank" rel="noopener noreferrer">{children}</a>:<span title="External or unapproved link hidden">{children}</span>}}>{text}</Markdown>}
+function PropertyDetails({unit,project,onClose}:{unit:Unit;project:Catalog['project_info'];onClose:()=>void}){
+  const [photo,setPhoto]=useState(0);
+  const img=unit.media.gallery_urls;
+  useEffect(()=>{const esc=(e:KeyboardEvent)=>{if(e.key==='Escape')onClose()};window.addEventListener('keydown',esc);return()=>window.removeEventListener('keydown',esc)},[onClose]);
+  return <div className="modal-shade" onMouseDown={e=>{if(e.target===e.currentTarget)onClose()}}><article className="property-detail-modal" role="dialog" aria-modal="true" aria-label={`${unit.unit_id} property details`}>
+    <header className="modal-header"><div><small>APPROVED SYNTHETIC PROPERTY RECORD</small><h2>{unit.commercial_name} <span>{unit.unit_id}</span></h2></div><button aria-label="Close property details" onClick={onClose}><X size={19}/></button></header>
+    {img.length?<div className="property-image-large"><img src={img[photo]} alt={`Illustrative ${unit.commercial_name}`}/>{img.length>1&&<div className="gallery-controls"><button onClick={()=>setPhoto((photo+img.length-1)%img.length)}>Previous</button><span>{photo+1}/{img.length}</span><button onClick={()=>setPhoto((photo+1)%img.length)}>Next</button></div>}</div>:<div className="no-image-large"><Images/> No gallery published</div>}
+    <div className="modal-content"><div className="property-modal-top"><strong>{usd.format(unit.price_usd)}</strong><span>{unit.status} · {dateText(unit.available_from_date)}</span></div>
+      <h3>Identity & inventory</h3><div className="detail-grid">
+        <Field label="Project" value={project.name}/><Field label="Unit code" value={unit.unit_id}/><Field label="Property type" value={unit.property_type}/><Field label="Type code" value={unit.property_type_code}/>
+        <Field label="Built area" value={`${unit.area_sqm} m²`}/><Field label="Lot area" value={unit.lot_area_m2==null?'Not specified':`${unit.lot_area_m2} m²`}/><Field label="Floor" value={unit.floor_number}/><Field label="Bedrooms" value={unit.bedrooms}/><Field label="Bathrooms" value={unit.bathrooms}/><Field label="Currency" value={unit.currency||'USD'}/><Field label="Status" value={unit.status}/><Field label="Available from" value={dateText(unit.available_from_date)}/><Field label="Inventory updated (UTC)" value={unit.demo_inventory_last_updated_at}/><Field label="Published" value={unit.publication_status||'Demo approved'}/><Field label="Phase" value={unit.phase_name}/><Field label="Phase ID" value={unit.phase_id}/><Field label="Type ID" value={unit.property_type_id}/>
+      </div>
+      {unit.property_model&&<><h3>Property model (type-level facts)</h3><div className="detail-grid">
+        <Field label="Model" value={unit.property_model.model_name}/>
+        <Field label="Model code" value={unit.property_model.code}/>
+        <Field label="Standard bedrooms" value={unit.property_model.bedrooms}/>
+        <Field label="Standard bathrooms" value={unit.property_model.bathrooms}/>
+        <Field label="Built area range" value={`${unit.property_model.built_area_min_m2 ?? '?'}–${unit.property_model.built_area_max_m2 ?? '?'} m²`}/>
+        <Field label="Lot area range" value={`${unit.property_model.lot_area_min_m2 ?? '?'}–${unit.property_model.lot_area_max_m2 ?? '?'} m²`}/>
+        <Field label="Total units of this model" value={unit.property_model.total_units}/>
+        <Field label="Model review" value={unit.property_model.review_status}/>
+        <Field label="Model inventory updated" value={unit.property_model.inventory_updated_at}/>
+      </div></>}
+      <h3>Property type description</h3><p>{unit.property_type_description||'No confirmed description available.'}</p>
+      <h3>Verified property features</h3><div className="detail-grid">{Object.keys(unit.confirmed_features||{}).length?Object.entries(unit.confirmed_features||{}).map(([key,val])=><Field key={key} label={key.replaceAll('_',' ')} value={val}/>):<p>No verified features are published.</p>}</div>
+      <h3>Project amenities</h3><div className="amenities-inline">{project.amenities.map(a=><span key={a}>{a}</span>)}</div>
+      <h3>Published documents & gallery</h3><div className="asset-links">{img.map((href,i)=><a key={href} href={href} target="_blank" rel="noopener noreferrer"><Images size={14}/> Image {i+1}</a>)}{unit.media.floorplan_brochure_pdf?<a href={unit.media.floorplan_brochure_pdf} target="_blank" rel="noopener noreferrer"><FileText size={14}/> Floor plan / brochure PDF</a>:<span>No unit PDF published</span>}{project.general_brochure_pdf&&<a href={project.general_brochure_pdf} target="_blank" rel="noopener noreferrer"><FileText size={14}/> Project brochure</a>}</div>
+      <h3>Project context</h3><div className="detail-grid"><Field label="Developer" value={project.developer}/><Field label="Development status" value={project.development_status}/><Field label="Project type" value={project.project_type}/><Field label="Location" value={`${project.location.street_address}, ${project.location.city}`}/></div>
+      <details className="inspector"><summary>Inspect approved unit JSON</summary><pre>{JSON.stringify(unit,null,2)}</pre></details><small className="fineprint">The displayed facts are synthetic published information, not real estate offers. No internal sources are exposed.</small>
     </div>
+  </article></div>;
+}
+
+export default function Page(){
+  const [catalog,setCatalog]=useState<Catalog|null>(null);
+  const [auth,setAuth]=useState<Session|null>(null);
+  const [loginRole,setLoginRole]=useState<'administrator'|'evaluator'>('evaluator');
+  const [credential,setCredential]=useState('');
+  const [leads,setLeads]=useState<Summary[]>([]);
+  const [active,setActive]=useState<Lead|null>(null);
+  const [showLeads,setShowLeads]=useState(false),[showCreate,setShowCreate]=useState(false),[form,setForm]=useState({...EMPTY_FORM});
+  const [filter,setFilter]=useState<'All'|'Apartment'|'House'>('All');
+  const [selected,setSelected]=useState<Unit|null>(null);
+  const [leftView,setLeftView]=useState<'inventory'|'calendar'>('inventory');
+  const [draft,setDraft]=useState('');const [busy,setBusy]=useState(false),[error,setError]=useState('');
+  const [calendarTick,setCalendarTick]=useState(0),[deleteId,setDeleteId]=useState<string|null>(null),[deleteConfirm,setDeleteConfirm]=useState('');
+  const [showJump,setShowJump]=useState(false);
+  const chatBody=useRef<HTMLDivElement>(null);
+  const state=active?.state;
+  const currentBooking=(state?.booked_visits||[]).find(b=>b.status==='confirmed');
+  const properties=(catalog?.properties||[]).filter(p=>filter==='All'||p.property_type===filter);
+  const authorizedHeaders: Record<string,string>={'Content-Type':'application/json', ...(auth?{'X-Demo-Csrf':auth.csrf_token}:{})};
+  const refreshLeads=useCallback(async()=>{const r=await fetch('/api/leads',{credentials:'same-origin'});if(r.ok)setLeads((await r.json()).leads)},[]);
+  const selectLead=useCallback(async(id:string)=>{setError('');const r=await fetch(`/api/leads/${id}`,{credentials:'same-origin'});if(!r.ok){setError('Unable to load lead');return;}setActive(await r.json());setDraft('');setShowLeads(false);setShowJump(false)},[]);
+  useEffect(()=>{fetch('/api/catalog').then(r=>r.json()).then(setCatalog).catch(()=>setError('Cannot load the published catalog.'));
+    fetch('/api/me',{credentials:'same-origin'}).then(r=>r.ok?r.json():null).then(s=>{if(s)setAuth(s)}).catch(()=>{});},[]);
+  useEffect(()=>{if(auth)void refreshLeads();else{setLeads([]);setActive(null)}},[auth,refreshLeads]);
+  // A deleted lead disappears from other evaluators' open tabs; stale UI never
+  // remains an alternate history viewer after the server purges the record.
+  useEffect(()=>{if(!auth)return;const id=setInterval(()=>{void refreshLeads();if(active&&!busy){fetch(`/api/leads/${active.id}`,{credentials:'same-origin'}).then(r=>{
+    if(r.status===404){setActive(null);setShowLeads(false);return null;}
+    return r.ok?r.json():null;
+  }).then(rec=>{if(rec&&rec.revision!==active.revision)setActive(rec)}).catch(()=>{});}},20000);
+    return()=>clearInterval(id);},[auth,active,busy,refreshLeads]);
+  useEffect(()=>{if(chatBody.current&&!showJump)chatBody.current.scrollTo({top:chatBody.current.scrollHeight,behavior:'smooth'})},[active?.messages,showJump,busy]);
+  async function login(){setBusy(true);setError('');try{const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({role:loginRole,credential})});const data=await r.json();if(!r.ok)throw new Error(data.detail||'Authentication failed');setAuth(data);setCredential('');}catch(e){setError(e instanceof Error?e.message:'Unable to log in')}finally{setBusy(false)}}
+  async function logout(){if(!auth)return;try{await fetch('/api/auth/logout',{method:'POST',headers:authorizedHeaders})}finally{setAuth(null);setActive(null)}}
+  async function newLead(){if(!auth||busy)return;setBusy(true);setError('');try{const r=await fetch('/api/leads',{method:'POST',headers:authorizedHeaders,body:JSON.stringify(form)});const data=await r.json();if(!r.ok)throw new Error(data.detail||'Failed to create lead');setActive(data);setForm({...EMPTY_FORM});setShowCreate(false);setLeftView('inventory');await refreshLeads();}catch(e){setError(e instanceof Error?e.message:'Unable to create lead')}finally{setBusy(false)}}
+  async function send(){const message=draft.trim();if(!auth||!active||!message||busy||state?.turn_count===MAX_TURNS)return;setBusy(true);setError('');setDraft('');const original=active;setActive({...active,messages:[...active.messages,{id:'pending',role:'user',content:message,created_at:new Date().toISOString()}]});try{const r=await fetch(`/api/leads/${active.id}/chat`,{method:'POST',headers:authorizedHeaders,body:JSON.stringify({message})});const data=await r.json();if(!r.ok)throw new Error(data.detail||'Failed to contact Hermes');setActive(data.lead);setCalendarTick(x=>x+1);void refreshLeads();setShowJump(false);}catch(e){setError(e instanceof Error?e.message:'Conversation failed');setActive(original);setDraft(message)}finally{setBusy(false)}}
+  async function permanentDelete(){if(!auth||!deleteId)return;const record=leads.find(l=>l.id===deleteId);if(!record||deleteConfirm!==`${record.first_name} ${record.last_name}`)return;setBusy(true);setError('');try{const r=await fetch(`/api/admin/leads/${deleteId}`,{method:'DELETE',headers:authorizedHeaders});const data=await r.json();if(!r.ok)throw new Error(data.detail||'Unable to delete lead');if(active?.id===deleteId)setActive(null);setDeleteId(null);setDeleteConfirm('');await refreshLeads();setCalendarTick(x=>x+1);}catch(e){setError(e instanceof Error?e.message:'Delete failed')}finally{setBusy(false)}}
+  const leadToDelete=leads.find(l=>l.id===deleteId);
+  return <div className="app-shell">
+    <aside className="sidebar"><div className="bp-logo"><span>black</span><b>penguin</b><small>.ai</small></div><nav><a href="#conversation" className="selected-nav"><MessageCircle size={17}/> Hermes agent</a></nav><div className="side-foot"><ShieldCheck size={15}/> Synthetic evaluation demo</div></aside>
+    <div className="shell-content"><header className="topbar"><div className="workspace-name"><strong>Hermes Agent Lab</strong><span>Real estate evaluation workspace</span></div><div className="topbar-actions"><small>OpenRouter · gpt-4o-mini</small>{auth?<><span className="role-tag">{auth.role}</span><button className="ghost" onClick={()=>void logout()}><LogOut size={14}/> Sign out</button></>:<span className="role-tag">Sign in required</span>}</div></header>
+      {error&&<div className="global-error" role="alert"><Info size={14}/>{error}<button onClick={()=>setError('')}><X size={13}/></button></div>}
+      {!auth?<div className="login-shell"><div className="login-panel"><LockKeyhole size={24}/><h1>Access the Hermes evaluation workspace</h1><p>Use fictional leads only. A demo invite opens an isolated evaluator workspace; an administrator can inspect and delete all leads.</p><div className="toggle-row"><button className={loginRole==='evaluator'?'current':''} onClick={()=>setLoginRole('evaluator')}>Evaluator</button><button className={loginRole==='administrator'?'current':''} onClick={()=>setLoginRole('administrator')}>Administrator</button></div><label>{loginRole==='administrator'?'Administrator password':'Private demo invite code'}<input type="password" value={credential} onChange={e=>setCredential(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')void login()}}/></label><button className="primary" disabled={!credential||busy} onClick={()=>void login()}>Open workspace</button><small>Administrator access requires a separate server-side password.</small></div></div>:
+      <main className="workspace" id="conversation">
+        <section className="panel inventory-panel"><div className="panel-top"><h2>{leftView==='inventory'?'Property inventory':'Sales calendar'}</h2><div className="toggle-row"><button className={leftView==='inventory'?'current':''} onClick={()=>setLeftView('inventory')}>Inventory</button><button className={leftView==='calendar'?'current':''} onClick={()=>setLeftView('calendar')}>Calendar</button></div></div>
+          <div className="panel-scroll">
+            {leftView==='inventory'?<>
+              {catalog&&<section className="project-strip"><div className="project-subtitle"><Building2 size={17}/> Project overview</div><h3>{catalog.project_info.name}</h3><div className="muted"><MapPin size={13}/>{catalog.project_info.location.city}, {catalog.project_info.location.country}</div><p>{catalog.project_info.value_proposition}</p><details><summary>Full project information</summary><div className="detail-grid"><Field label="Developer" value={catalog.project_info.developer}/><Field label="Development status" value={catalog.project_info.development_status}/><Field label="Type" value={catalog.project_info.project_type}/><Field label="Project code" value={catalog.project_info.project_code}/><Field label="Address" value={catalog.project_info.location.street_address}/><Field label="Published revision" value={catalog.project_info.published_revision}/></div><div className="amenities-inline">{catalog.project_info.amenities.map(a=><span key={a}>{a}</span>)}</div>{catalog.project_info.general_brochure_pdf&&<a href={catalog.project_info.general_brochure_pdf} target="_blank" rel="noopener noreferrer"><FileText size={14}/> Project brochure</a>}</details></section>}
+              <div className="filter-row"><strong>{properties.length} available units</strong><div className="toggle-row">{(['All','Apartment','House'] as const).map(f=><button key={f} className={filter===f?'current':''} onClick={()=>setFilter(f)}>{f==='All'?'All':`${f}s`}</button>)}</div></div>
+              <div className="unit-list">{properties.map(u=><button className="unit-row" key={u.unit_id} onClick={()=>setSelected(u)}><div className="unit-thumb">{u.media.gallery_urls.length?<img src={u.media.gallery_urls[0]} alt={`Illustration of ${u.unit_id}`}/>:<Images size={20}/>}</div><div><div className="unit-name"><strong>{u.unit_id}</strong><span>{u.property_type}</span></div><p>{u.commercial_name}</p><div className="unit-metrics"><BedDouble size={12}/>{u.bedrooms} <Bath size={12}/>{u.bathrooms} <Square size={12}/>{u.area_sqm} m²</div><div className="unit-price">{usd.format(u.price_usd)}<small>{u.status}</small></div></div><ChevronRight size={16}/></button>)}</div>
+              <p className="fineprint">Full published facts are available inside each unit record. Reserved inventory is not recommended by Hermes.</p>
+            </>:<SalesCalendar refresh={calendarTick}/>}
+          </div>
+        </section>
+        <section className="panel chat-panel"><div className="panel-top chat-top"><div><h2>Hermes conversation</h2><small>{active?`${active.first_name} ${active.last_name} · ${active.state.turn_count}/${MAX_TURNS} turns`:'No lead selected'}</small></div><button className="primary compact" onClick={()=>setShowCreate(true)}><Plus size={14}/> New lead</button></div>
+          <div className="lead-switch"><button className="lead-switch-button" onClick={()=>setShowLeads(!showLeads)}><Users size={16}/><span>{active?`${active.first_name} ${active.last_name}`:'Select a lead'}</span><ChevronDown size={15}/></button>{showLeads&&<div className="lead-dropdown">{leads.length?leads.map(l=><div className={`lead-option ${active?.id===l.id?'active':''}`} key={l.id}><button onClick={()=>void selectLead(l.id)}><UserRound size={15}/><span><strong>{l.first_name} {l.last_name}</strong><small>{l.last_message?.slice(0,55)||'No messages'}</small></span></button>{auth.role==='administrator'&&<button aria-label={`Delete ${l.first_name} ${l.last_name}`} className="icon-btn danger" onClick={()=>{setDeleteId(l.id);setShowLeads(false)}}><Trash2 size={15}/></button>}</div>):<p>No leads yet. Create one to begin.</p>}</div>}</div>
+          {active?<><div className="chat-messages" ref={chatBody} onScroll={e=>{const el=e.currentTarget;setShowJump(el.scrollHeight-el.scrollTop-el.clientHeight>110)}}>
+            {active.messages.map(m=><div key={m.id} className={`message ${m.role}`}><div className="message-role">{m.role==='assistant'?'Ava · Hermes':'Lead'}</div><div className="message-content"><ChatMarkdown text={m.content}/></div></div>)}
+            {busy&&<div className="message assistant"><div className="message-role">Ava · Hermes</div><div className="message-content">Thinking…</div></div>}
+          </div>{showJump&&<button className="jump-bottom" onClick={()=>{chatBody.current?.scrollTo({top:chatBody.current.scrollHeight,behavior:'smooth'});setShowJump(false)}}><ArrowDown size={14}/> Latest</button>}
+          <div className="composer-area"><div className="composer-box"><textarea rows={2} value={draft} onChange={e=>setDraft(e.target.value)} disabled={busy||state?.turn_count===MAX_TURNS} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();void send()}}} placeholder={state?.turn_count===MAX_TURNS?'Demo limit reached':'Type as this fictional lead…'}/><button className="send-btn" disabled={!draft.trim()||busy||state?.turn_count===MAX_TURNS} aria-label="Send" onClick={()=>void send()}><ArrowUp size={18}/></button></div><div className="fineprint">Conversations and meetings are saved in the shared demo database. No real sales notifications are sent.</div></div></>:<div className="empty-chat"><MessageCircle size={28}/><h3>Start with a demo lead</h3><p>Create fictional contact details or select a previous conversation.</p><button className="primary" onClick={()=>setShowCreate(true)}><Plus size={14}/> New lead</button></div>}
+        </section>
+        <section className="panel lead-panel"><div className="panel-top"><div><h2>Lead state</h2><small>{active?'Live structured facts':'Waiting for a lead'}</small></div></div>
+          <div className="panel-scroll lead-scroll">{active&&state?<>
+            <section className="state-section"><h3>Contact</h3><div className="state-kv"><span>Name</span><strong>{active.first_name} {active.last_name}</strong></div><div className="state-kv"><span>Phone</span><strong>{active.phone}</strong></div><div className="state-kv"><span>Email</span><strong className="break-anywhere">{active.email}</strong></div></section>
+            <section className="state-section"><h3>Qualification</h3><div className="state-kv"><span>Budget</span><strong>{state.lead.budget_usd?usd.format(state.lead.budget_usd):'Not captured'}</strong></div><div className="state-kv"><span>Purchase timeframe</span><strong>{state.lead.purchase_timeframe||'Not captured'}</strong></div><div className="state-kv"><span>Property type</span><strong>{state.lead.property_type||'Not captured'}</strong></div><div className="state-kv"><span>Bedrooms</span><strong>{state.lead.min_bedrooms||'Not captured'}</strong></div><small className="stage-label">{state.stage}</small></section>
+            <section className="state-section"><h3>Property interest</h3><div className="state-kv"><span>Active unit</span><strong>{state.lead.interest_unit_id||'Not declared'}</strong></div>{(state.property_interests||[]).length?<div className="interest-list">{state.property_interests?.map(i=><button key={i.unit_id} onClick={()=>{const u=catalog?.properties.find(u=>u.unit_id===i.unit_id);if(u)setSelected(u)}}><span>{i.unit_id}</span><small>{i.status}</small><ChevronRight size={13}/></button>)}</div>:<small className="muted">Unit mentions and explicit interest will appear here.</small>}{state.shortlisted_unit_ids.length>0&&<small className="muted">Matched by agent: {state.shortlisted_unit_ids.join(', ')}</small>}</section>
+            <section className="state-section"><h3>Appointment</h3>{currentBooking?<div className="appointment-card"><div className="status-line"><Check size={13}/> Confirmed · Demo only</div><strong>{currentBooking.date} · {currentBooking.start_time}–{currentBooking.end_time}</strong><small>{currentBooking.advisor_name}</small><small>{currentBooking.unit_id||'General project visit'}</small></div>:<div className="no-appointment">No confirmed appointment</div>}{state.booking_proposal?.status==='offered'&&<div className="offer-summary"><small>Offered · not booked · expires {new Date(state.booking_proposal.expires_at).toLocaleTimeString()}</small>{state.booking_proposal.options.map(opt=><div key={`${opt.advisor_id}-${opt.date}-${opt.start_time}`}>{opt.date} {opt.start_time} · {opt.advisor_name}</div>)}</div>}{state.booked_visits.filter(b=>b.status!=='confirmed').length>0&&<details className="inspector"><summary>Previous visits</summary>{state.booked_visits.filter(b=>b.status!=='confirmed').map(b=><div className="state-kv" key={b.meeting_id}><span>{b.date}</span><strong>{b.status}</strong></div>)}</details>}</section>
+            <details className="inspector"><summary>Evidence & provenance</summary>{Object.values(state.bp_episode?.leads?.lead_profile_data?.sales_profile?.current||{}).map(f=><div className="evidence-line" key={f.id}><strong>{f.field}: {String(f.value)}</strong><small>{f.status} · {f.source}</small><p>{f.evidence}</p></div>)}</details>
+            <details className="inspector"><summary>Inspect conversation state JSON</summary><pre>{JSON.stringify(state,null,2)}</pre></details>
+          </>:<div className="lead-empty"><UserRound size={25}/><p>Select a lead to inspect its qualification, interest and appointments.</p></div>}</div>
+        </section>
+      </main>}
+    </div>
+    {selected&&catalog&&<PropertyDetails unit={selected} project={catalog.project_info} onClose={()=>setSelected(null)}/>}
+    {showCreate&&<div className="modal-shade" onMouseDown={e=>{if(e.target===e.currentTarget)setShowCreate(false)}}><form className="small-modal" onSubmit={e=>{e.preventDefault();void newLead()}}><div className="modal-header"><h2>New demo lead</h2><button type="button" onClick={()=>setShowCreate(false)}><X size={18}/></button></div><p>Enter fictional contact information to start a separate Hermes conversation.</p><div className="form-grid">{(['first_name','last_name','phone','email'] as const).map(key=><label key={key}>{({first_name:'First name',last_name:'Last name',phone:'Phone number',email:'Email'})[key]}<input required autoComplete="off" type={key==='email'?'email':'text'} value={form[key]} onChange={e=>setForm(v=>({...v,[key]:e.target.value}))} placeholder={key==='email'?'alex@example.test':key==='phone'?'+51999999999':undefined}/></label>)}</div><button className="primary" type="submit" disabled={busy}>Create lead & start conversation</button><small className="fineprint">Registration details are stored as structured input, not inferred by Hermes.</small></form></div>}
+    {deleteId&&leadToDelete&&<div className="modal-shade" onMouseDown={e=>{if(e.target===e.currentTarget)setDeleteId(null)}}><div className="small-modal"><div className="modal-header"><h2>Delete lead permanently</h2><button onClick={()=>setDeleteId(null)}><X size={18}/></button></div><p>This permanently removes the contact, conversation, profile, facts, appointment offers, meetings and their occupied slots from the demo database.</p><label>Type <strong>{leadToDelete.first_name} {leadToDelete.last_name}</strong> to confirm<input value={deleteConfirm} onChange={e=>setDeleteConfirm(e.target.value)}/></label><button className="delete-action" disabled={busy||deleteConfirm!==`${leadToDelete.first_name} ${leadToDelete.last_name}`} onClick={()=>void permanentDelete()}><Trash2 size={15}/> Permanently delete lead</button><small className="fineprint">Only administrators can perform this action. Provider backups and external AI logs are outside application-level deletion.</small></div></div>}
   </div>;
 }
