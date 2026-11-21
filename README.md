@@ -94,8 +94,8 @@ catalog and verify no differences, and \`cd frontend && npm install && npm run
 build\`. GitHub Actions performs these checks. Also test Hermes/OpenRouter/Turso
 on a non-production Preview with fictional leads, especially **a paused H-201
 visit interrupted by "other 3-bedroom homes under my $300k budget"**. CI tests
-cover deterministic contracts and mocked agent integration, not real language
-model reliability. Do not auto-merge this PR.
+cover deterministic contracts and a complete HTTP/Turso-like mocked turn,
+not live language-model reliability. Do not auto-merge this PR.
 
 ## v12 — Contextual Sales Graph & Commercial Memory
 
