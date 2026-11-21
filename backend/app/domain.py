@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 from datetime import timezone
-from . import scheduling, sales_preferences, conversation_context, property_filters
+from . import scheduling, sales_preferences, conversation_context, property_filters, commercial_turn, search_sessions
 
 PROJECT_TZ = ZoneInfo('America/Lima')
 VISIT_MINUTES = 45
@@ -93,6 +93,10 @@ def blank_state() -> dict:
         'shared_media': {},
         'search_preferences': sales_preferences.empty(),
         'search_preferences_history': [],
+        'active_search': None,
+        'search_sessions': [],
+        'visit_planning_paused': False,
+        'offered_assets': {},
         'property_filters': property_filters.empty(),
         'property_filters_history': [],
         'booked_visits': [],
@@ -139,6 +143,9 @@ def update_search_preferences(state: dict, **kwargs) -> dict:
     if set(kwargs)-set(keys):
         return {'error':'Unknown commercial preference.'}
     message=str(state.get('_active_source_message_text') or '')
+    if state.get('_turn_scope')=='temporary':
+        return {'ok':True,'changed_fields':[],
+                'scope':'temporary','note':'Use search_properties for this exploration; permanent preferences unchanged.'}
     recognized=sales_preferences.parse_declarations(message)
     requested={}
     for name,value in kwargs.items():
@@ -292,7 +299,8 @@ def _observe_inbound_context(state: dict, message: str) -> None:
     resolution=conversation_context.resolved_reference(state,message,known)
     state['_turn_property_resolution']=resolution
     named=conversation_context.mentioned_codes(message,known)
-    discussed=bool(conversation_context.is_detail_question(message))
+    discussed=(state.get('_turn_intent')=='property_details' and
+               bool(conversation_context.is_detail_question(message)))
     exploration_yes=conversation_context.is_property_confirmation(
         message,str(state.get('last_assistant_reply') or ''))
     visit_intent=bool(re.search(
@@ -310,13 +318,22 @@ def _observe_inbound_context(state: dict, message: str) -> None:
         r'\s*(?:yes|yes please|sure|certainly|of course)[.!]?\s*',
         message,re.I))
     pending_booking=bool(state.get('confirmation_request'))
-    should_focus=(len(named)==1 or
+    should_focus=((len(named)==1 and state.get('_turn_intent') not in
+                  ('property_search','property_comparison')) or
                   (affirmative_only and not pending_booking and
                    resolution.get('unit_id') and not resolution.get('ambiguous')) or
                   (resolution.get('unit_id') and (
                       discussed or exploration_yes or interest_declared or
                       visit_intent or resolution.get('reason') in ('ordinal','comparative'))))
-    if should_focus and resolution.get('unit_id'):
+    if state.get('_turn_intent')=='property_search':
+        state['conversation_phase']='exploration'
+        state['stage']='Exploring property alternatives'
+        state['visit_planning_paused']=bool(_draft(state).get('unit_id') and
+                                         _draft(state).get('status') not in ('confirmed','idle'))
+        # A prior request to confirm a visit cannot survive an intervening
+        # search as a standing consent. The slot remains a draft.
+        state['confirmation_request']=None
+    elif should_focus and resolution.get('unit_id'):
         _set_focus(state,resolution['unit_id'])
         state['conversation_phase']='property_details' if discussed or exploration_yes else state.get('conversation_phase','discovery')
         if exploration_yes or interest_declared:
@@ -396,7 +413,9 @@ def begin_turn(state: dict, message: str) -> None:
     mid = str(uuid.uuid4())
     state['_active_source_message_id'] = mid
     state['_active_source_message_text'] = message
-    state['_last_inbound_topic']=conversation_context.topic(message)
+    state['_turn_intent']=commercial_turn.intent(message)
+    state['_turn_scope']=commercial_turn.scope(message,search_sessions.has_main_preferences(state))
+    state['_last_inbound_topic']=commercial_turn.core_query_topic(message)
     _observe_inbound_context(state, message)
     bp['sales_messages'].append({
         'id': mid, 'conversation_id': bp['ids']['conversation_id'],
@@ -414,7 +433,9 @@ def begin_turn(state: dict, message: str) -> None:
 
 def _remember_answered_topics(state: dict, reply: str) -> None:
     """Record information actually delivered, not merely fetched by a tool."""
-    topic=state.get('_last_inbound_topic') or state.get('_pending_factual_topic_override')
+    topic=(state.get('_last_inbound_topic') or state.get('_pending_factual_topic_override'))
+    if state.get('_turn_intent') in ('property_search','property_comparison'):
+        topic=None
     resolution=state.get('_turn_property_resolution') or {}
     unit_id=resolution.get('unit_id') or _focus(state).get('unit_id')
     details=state.get('_details_for_current_turn') or {}
@@ -477,6 +498,9 @@ def end_turn(state: dict, reply: str) -> None:
     state['last_assistant_reply']=reply
     state.pop('_active_source_message_id', None)
     state.pop('_active_source_message_text', None)
+    state.pop('_turn_intent', None)
+    state.pop('_turn_scope', None)
+    state.pop('_search_tool_called_this_turn', None)
     # A simple explicit single-media offer can be accepted with "yes" next turn.
     # A combined "photos or visit?" question is ambiguous and never preauthorized.
     text = reply.lower()
@@ -670,10 +694,14 @@ def evaluate_properties(state: dict, max_budget_usd: int | None = None,
                         target_purchase_timeframe: str | None = None,
                         min_bedrooms: int | None = None,
                         preferred_property_type: str | None = None,
-                        required_features: dict | None = None) -> dict:
+                        required_features: dict | None = None,
+                        *, _preferences_override: dict | None = None,
+                        _filters_override: dict | None = None,
+                        _bedrooms_any: list[int] | None = None) -> dict:
     """Rank literal buyer matches. Never silently relax a declared constraint."""
     lead = state.get('lead', {})
-    prefs = copy.deepcopy(_preferences(state))
+    prefs = copy.deepcopy(_preferences_override if _preferences_override is not None
+                          else _preferences(state))
     try:
         fallback_max = int(max_budget_usd) if max_budget_usd is not None else None
         if fallback_max is not None and fallback_max <= 0:
@@ -699,7 +727,8 @@ def evaluate_properties(state: dict, max_budget_usd: int | None = None,
     if chosen_type == 'invalid':
         return {'error':'Preferred property type must be House, Apartment or Either.'}
     features = required_features or {}
-    refinements=state.get('property_filters') or property_filters.empty()
+    refinements=(_filters_override if _filters_override is not None
+                 else state.get('property_filters') or property_filters.empty())
     if not isinstance(features, dict):
         return {'error':'Required features must be a JSON object.'}
     allowed_features = {'kitchen_layout','private_backyard','backyard_area_m2',
@@ -724,6 +753,8 @@ def evaluate_properties(state: dict, max_budget_usd: int | None = None,
         unit['ready_by_purchase_deadline']=None if deadline is None else ready_date(unit)<=deadline
         eligible, violations, deviations=sales_preferences.filter_unit(unit,prefs)
         violations.extend(property_filters.matches(unit,refinements))
+        if _bedrooms_any is not None and unit['bedrooms'] not in _bedrooms_any:
+            violations.append('Bedroom count not among the requested alternatives')
         if chosen_type and unit['property_type']!=chosen_type:
             violations.append('Different property category')
         if any(
@@ -760,6 +791,8 @@ def evaluate_properties(state: dict, max_budget_usd: int | None = None,
     out_budget.sort(key=lambda u:(u.get('exceeds_budget_by_usd',0),u['unit_id']))
     state['shortlisted_unit_ids']=[u['unit_id'] for u in primary]
     state['stage']='Properties matched' if primary else 'Exploring alternatives'
+    if state.get('_turn_intent')=='property_search':
+        state['conversation_phase']='exploration'
     record(state,'matching',f"{len(primary)} exact matches; {len(alternatives)} optional alternatives")
     def compact(u):
         fields=('unit_id','commercial_name','property_type','bedrooms',
@@ -800,6 +833,50 @@ def evaluate_properties(state: dict, max_budget_usd: int | None = None,
                'Soft bedroom differences are labeled alternatives, NEVER matches. '
                'Inventory, prices and advisors are fictional.'
     }
+
+
+
+
+def search_properties(state: dict, criteria: dict | None = None,
+                      scope: str | None = None) -> dict:
+    """Commercial search, isolated from a pending visit or main preferences.
+
+    Hermes proposes typed criteria. The backend chooses whether a revision is
+    supported by the buyer's wording; an exploration cannot silently persist.
+    """
+    utterance=str(state.get('_active_source_message_text') or '')
+    base=(state.get('_turn_property_resolution') or {})
+    source_unit=_units_by_code().get(base.get('unit_id')) if not base.get('ambiguous') else None
+    try:
+        search=search_sessions.derive(state,utterance,criteria,source_unit=source_unit)
+    except (ValueError,TypeError) as exc:
+        return {'error':str(exc),'error_code':'SEARCH_CRITERIA_INVALID',
+                'next_action':'Use supported filters explicitly stated by the buyer.'}
+    if scope and scope not in ('temporary','permanent'):
+        return {'error':'Search scope must be temporary or permanent.',
+                'error_code':'SEARCH_SCOPE_INVALID'}
+    if scope=='permanent' and search['scope']!='permanent':
+        # The model cannot promote exploratory options into permanent facts.
+        search['scope']='temporary'
+    result=evaluate_properties(
+        state,_preferences_override=search['preferences'],
+        _filters_override=search['filters'],_bedrooms_any=search['bedrooms_any'])
+    if not result.get('ok'):
+        return result
+    session=search_sessions.save_search(state,search,result)
+    state['conversation_phase']='exploration'
+    state['stage']='Exploring property alternatives'
+    state['_turn_intent']='property_search'
+    state['_search_tool_called_this_turn']=True
+    state['_matching_options_this_turn']=result['matching_properties']
+    record(state,'search_completed',f"{len(result['matching_properties'])} matches; {session['scope']} scope")
+    return {**result,'scope':search['scope'],'active_search':{
+        'revision':session['revision'],'source_message_id':session['source_message_id'],
+        'criteria':session['criteria'],'scope':session['scope']},
+        'primary_preferences_modified':False,
+        'visit_draft_modified':False,
+        'note':'This search does not change the appointment draft. The source of '
+               'truth remains the server-verified catalogue and buyer constraints.'}
 
 
 
@@ -1320,6 +1397,18 @@ def update_lead(state: dict, **kwargs: Any) -> dict:
     identity or consent. Unknown fields are rejected, not silently discarded.
     """
     lead = state['lead']
+    if state.get('_turn_scope')=='temporary':
+        # Tool writes cannot turn a comparison into a permanent qualification.
+        blocked={'budget_usd','min_bedrooms','budget','budget_minimum',
+                 'budget_maximum','bedrooms','property_type','purchase_timeframe'}
+        requested=set(kwargs)
+        if requested & blocked:
+            rest={k:v for k,v in kwargs.items() if k not in blocked}
+            if not rest:
+                return {'ok':True,'changed_fields':{},
+                        'scope':'temporary',
+                        'note':'Exploratory criteria belong in search_properties.'}
+            kwargs=rest
     supported = set(lead)
     changed = {}
     bp_changed = {}
@@ -1488,6 +1577,10 @@ def verify_explicit_preferences(state: dict, message: str) -> dict:
     No second LLM, no speculative profile facts. An audit event distinguishes
     this protective validation from Hermes-originated tool calls.
     """
+    if (state.get('_turn_intent')=='property_search' and
+            state.get('_turn_scope')=='temporary'):
+        return {'ok':True,'scope':'temporary','changed_fields':{},
+                'note':'Exploratory request. Persistent buyer preferences preserved.'}
     values = explicitly_declared_preferences(message)
     missing = {key: val for key, val in values.items() if state['lead'].get(key) != val}
     if missing:
@@ -1823,6 +1916,9 @@ def profile_snapshot(state: dict) -> dict:
     return {
         'lead': dict(state.get('lead') or {}),
         'search_preferences': copy.deepcopy(_preferences(state)),
+        'active_search':copy.deepcopy(state.get('active_search')),
+        'visit_planning_paused':bool(state.get('visit_planning_paused')),
+        'offered_assets':copy.deepcopy(state.get('offered_assets') or {}),
         'property_filters':copy.deepcopy(state.get('property_filters') or property_filters.empty()),
         'recent_preferences_changes': copy.deepcopy(state.get('search_preferences_history', [])[-3:]),
         'confirmation_request': copy.deepcopy(state.get('confirmation_request')),
