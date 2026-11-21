@@ -365,6 +365,10 @@ def _run_locked(message: str, history: list[dict], state: dict, *,
             result['document_resend']=any(
                 d['url'] in set(previous.get('document_urls_sent') or [])
                 for d in matched)
+            if result['document_resend']:
+                state.setdefault('_media_resend_urls_this_turn',[]).extend(
+                    d['url'] for d in matched
+                    if d['url'] in set(previous.get('document_urls_sent') or []))
             result['requested_documents_available']=bool(matched)
             if not matched:
                 result['unavailable_requested_type']='floor_plan' if floor else 'brochure' if brochure else 'pdf'
@@ -373,6 +377,8 @@ def _run_locked(message: str, history: list[dict], state: dict, *,
             result['gallery_url']=media['gallery_url']
             result['gallery_available']=bool(media['gallery_url'])
             result['gallery_resend']=bool(previous.get('gallery_sent'))
+            if result['gallery_resend'] and media['gallery_url']:
+                state.setdefault('_media_resend_urls_this_turn',[]).append(media['gallery_url'])
             if media['gallery_url']:
                 approved.append(media['gallery_url'])
         return result
