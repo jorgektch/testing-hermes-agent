@@ -19,7 +19,7 @@ function minute(v:string){const [h,m]=v.split(':').map(Number);return h*60+m;}
 const START=8*60,END=19*60,STEP=60,HEIGHT=60;
 const timeLabels=Array.from({length:(END-START)/STEP},(_,i)=>`${pad(Math.floor((START+i*STEP)/60))}:${pad((START+i*STEP)%60)}`);
 
-export default function SalesCalendar({refresh=0}:{refresh?:number}){
+export default function SalesCalendar({refresh=0,focusDate}:{refresh?:number;focusDate?:string|null}){
   const [viewerZoneName,setViewerZoneName]=useState(INITIAL_TZ);
   const [viewerZone,setViewerZone]=useState(true),[mode,setMode]=useState<'day'|'week'>('day');
   const [now,setNow]=useState<Date>(()=>new Date());
@@ -30,6 +30,14 @@ export default function SalesCalendar({refresh=0}:{refresh?:number}){
   const [error,setError]=useState('');
   const [expanded,setExpanded]=useState(false);
   const [loading,setLoading]=useState(false);
+  const [expandedWeekSlots,setExpandedWeekSlots]=useState<Record<string,boolean>>({});
+  useEffect(()=>{
+    // Follow the date Hermes actually queried, without changing a manually
+    // chosen day/week mode. The lead may investigate another day at any time.
+    if(focusDate&&/^20\d{2}-\d{2}-\d{2}$/.test(focusDate)){
+      setDay(focusDate);
+    }
+  },[focusDate]);
   const chosen=useMemo(()=>new Set(selected.length?selected:(calendar?.advisors||[]).map(a=>a.advisor_id)),[selected,calendar]);
   const visible=(calendar?.advisors||[]).filter(a=>chosen.has(a.advisor_id));
   useEffect(()=>{const viewer=Intl.DateTimeFormat().resolvedOptions().timeZone||PROJECT_TZ;setViewerZoneName(viewer);setDay(dateParts(new Date(),viewer).date);const id=setInterval(()=>setNow(new Date()),30000);return ()=>clearInterval(id);},[]);
@@ -57,6 +65,7 @@ export default function SalesCalendar({refresh=0}:{refresh?:number}){
   const current=dateParts(now,tz);
   function shift(n:number){setDay(d=>addDay(d,n*(mode==='day'?1:7)));}
   function selectAll(){setSelected([]);}
+  function toggleWeekSlots(key:string){setExpandedWeekSlots(v=>({...v,[key]:!v[key]}));}
   function toggle(id:string){const all=calendar?.advisors.map(a=>a.advisor_id)||[];const current=new Set(selected.length?selected:all);if(current.has(id))current.delete(id);else current.add(id);setSelected([...current]);}
   return <section className={`sales-calendar ${expanded?'calendar-expanded':''}`} aria-label="Sales advisor calendar">
     <div className="calendar-header">
@@ -99,7 +108,17 @@ export default function SalesCalendar({refresh=0}:{refresh?:number}){
     </div>:<div className="calendar-scroll"><div className="calendar-week">
       {shownDays.map(d=><div className={`calendar-week-day ${d===today?'calendar-today':''}`} key={d}>
         <div className="calendar-week-head">{readable(d,tz)}</div>
-        {visible.map(a=>{const data=byDay(d,a.user_id);return <div key={a.user_id} className="calendar-week-advisor"><strong>{a.name.split(' ')[0]}</strong><small>{data.slots.length} slots</small>{data.meetings.map(m=><span className="week-booking" key={m.id}>{localTime(m.starts_at,tz).time} Booked · {m.unit_id||'Visit'}</span>)}{data.slots.slice(0,3).map(s=><span className="week-slot" key={s.starts_at}>{localTime(s.starts_at,tz).time} available</span>)}{data.slots.length>3&&<small>+{data.slots.length-3} more slots</small>}</div>;})}
+        {visible.map(a=>{const data=byDay(d,a.user_id),key=d+':'+a.user_id,showAll=Boolean(expandedWeekSlots[key]);
+          return <div key={a.user_id} className="calendar-week-advisor">
+            <strong>{a.name.split(' ')[0]}</strong><small>{data.slots.length} slots</small>
+            {data.meetings.map(m=><span className="week-booking" key={m.id}>{localTime(m.starts_at,tz).time} Booked · {m.unit_id||'Visit'}</span>)}
+            {(showAll?data.slots:data.slots.slice(0,3)).map(s=><span className="week-slot" key={s.starts_at}>{localTime(s.starts_at,tz).time} available</span>)}
+            {data.slots.length>3&&<button type="button" className="week-show-more"
+               aria-expanded={showAll} aria-label={showAll?'Collapse extra slots for '+a.name+' on '+d:'Show all slots for '+a.name+' on '+d}
+               onClick={()=>toggleWeekSlots(key)}>
+               {showAll?'Show fewer slots':`Show all ${data.slots.length} slots (+${data.slots.length-3})`}
+            </button>}
+          </div>;})}
       </div>)}
     </div></div>}
     <div className="calendar-legend"><span><i className="legend-available"/>Available</span><span><i className="legend-booked"/>Booked</span><span><i className="legend-buffer"/>Buffer</span><span><i className="legend-now"/>Now</span></div>
