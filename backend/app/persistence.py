@@ -161,6 +161,18 @@ def _occupancy_buckets(start: datetime, until: datetime) -> range:
     return range(first, end)
 
 
+# Python libsql's remote driver accepts positional bindings, not dict arguments.
+# One ordered tuple is reused by both synthetic fixtures and agent bookings.
+MEETING_FIELDS = (
+    'id', 'lead_id', 'conversation_id', 'advisor_id', 'unit_id', 'starts_at',
+    'ends_at', 'occupied_until', 'status', 'replacement_of', 'source', 'created_at',
+)
+
+
+def _meeting_params(meeting: dict) -> tuple:
+    return tuple(meeting[field] for field in MEETING_FIELDS)
+
+
 def _reserve(con, meeting: dict):
     for bucket in _occupancy_buckets(as_dt(meeting['starts_at']), as_dt(meeting['occupied_until'])):
         con.execute('INSERT INTO meeting_occupancy (advisor_id,bucket_utc,meeting_id) VALUES (?,?,?)',
@@ -202,7 +214,7 @@ def _initialize_schema():
                            status='confirmed', replacement_of=None, source='synthetic_fixture', created_at=iso())
             con.execute('''INSERT OR IGNORE INTO meetings
                (id,lead_id,conversation_id,advisor_id,unit_id,starts_at,ends_at,occupied_until,status,replacement_of,source,created_at)
-               VALUES (:id,:lead_id,:conversation_id,:advisor_id,:unit_id,:starts_at,:ends_at,:occupied_until,:status,:replacement_of,:source,:created_at)''', meeting)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''', _meeting_params(meeting))
             _reserve(con, meeting)
         con.execute("INSERT INTO schema_meta(key,value) VALUES('fixtures_seeded',?)", (iso(),))
 
@@ -329,7 +341,7 @@ def _sync_meetings(con, state: dict, lead_id: str, conversation_id: str):
         if row['id'] in prev:continue
         con.execute('''INSERT INTO meetings
           (id,lead_id,conversation_id,advisor_id,unit_id,starts_at,ends_at,occupied_until,status,replacement_of,source,created_at)
-          VALUES (:id,:lead_id,:conversation_id,:advisor_id,:unit_id,:starts_at,:ends_at,:occupied_until,:status,:replacement_of,:source,:created_at)''', row)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''', _meeting_params(row))
         if row['status'] in ACTIVE:
             try:_reserve(con,row)
             except Exception as exc:
