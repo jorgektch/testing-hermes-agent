@@ -11,12 +11,13 @@ type Catalog={project_info:{name:string;developer:string;project_type?:string;de
 type SearchPreferences={revision:number;budget:{mode:string;minimum_usd:number|null;maximum_usd:number|null;target_usd:number|null;exact_price_usd:number|null;currency?:string};bedrooms:{mode:string;minimum:number|null;maximum:number|null;preferred:number|null};last_source_message_id?:string|null};
 type PropertyFilters={revision:number;min_area_sqm:number|null;max_area_sqm:number|null;min_bathrooms:number|null;max_bathrooms:number|null;min_parking_spaces:number|null;kitchen_layout:string|null;private_backyard:boolean|null;relative_price_lt:number|null;relative_price_gt:number|null;source_unit_id:string|null;source_message_id:string|null};
 type AnsweredTopic={unit_id:string;topic:string;source_message_id:string|null;reply_message_id:string;recorded_at:string};
+type ActiveSearch={revision:number;scope:'temporary'|'permanent';criteria:Record<string,unknown>;matching_unit_ids:string[];source_message_id:string|null;created_at:string};
 type Fact={id:string;field:string;value:unknown;status:string;source:string;evidence?:string;captured_at?:string;source_ref?:{message_id?:string}};
 type Booking={meeting_id:string;advisor_name:string|null;unit_id:string|null;date:string;start_time:string;end_time:string;status:string;visit_location?:{label:string;address?:string;maps_url:string|null;verification_status:string}};
-type State={property_filters?:PropertyFilters;conversation_phase?:string;last_presented_units?:string[];answered_topics?:AnsweredTopic[];search_preferences?:SearchPreferences;search_preferences_history?:{prior:SearchPreferences;changes:unknown;source_message_id?:string;changed_at?:string}[];confirmation_request?:{unit_id:string;date:string;start_time:string}|null;last_offered_date?:string|null;shared_media?:Record<string,{gallery_sent?:boolean;document_urls_sent?:string[]}>;conversation_focus?:{project_id?:string;unit_id?:string|null;ambiguous?:boolean};visit_draft?:{unit_id?:string|null;date?:string|null;start_time?:string|null;status?:string};last_slot_search?:{result_code?:string;requested?:string;date?:string};exploring_unit_id?:string|null;ui_fact_evidence?:Record<string,Evidence>;tool_observations?:ToolObservation[];lead:{first_name:string|null;last_name:string|null;phone:string|null;email:string|null;budget_usd:number|null;purchase_timeframe:string|null;property_type:string|null;min_bedrooms:number|null;interest_unit_id:string|null};stage:string;turn_count:number;shortlisted_unit_ids:string[];booked_visits:Booking[];property_interests?:{unit_id:string;status:string;source_message_id?:string}[];booking_proposal?:{proposal_id:string;status:string;expires_at:string;options:{date:string;start_time:string}[]}|null;bp_episode?:{leads:{lead_profile_data:{sales_profile:{current:Record<string,Fact>}}}}};
+type State={active_search?:ActiveSearch|null;visit_planning_paused?:boolean;offered_assets?:Record<string,string[]>;property_filters?:PropertyFilters;conversation_phase?:string;last_presented_units?:string[];answered_topics?:AnsweredTopic[];search_preferences?:SearchPreferences;search_preferences_history?:{prior:SearchPreferences;changes:unknown;source_message_id?:string;changed_at?:string}[];confirmation_request?:{unit_id:string;date:string;start_time:string}|null;last_offered_date?:string|null;shared_media?:Record<string,{gallery_sent?:boolean;document_urls_sent?:string[]}>;conversation_focus?:{project_id?:string;unit_id?:string|null;ambiguous?:boolean};visit_draft?:{unit_id?:string|null;date?:string|null;start_time?:string|null;status?:string};last_slot_search?:{result_code?:string;requested?:string;date?:string};exploring_unit_id?:string|null;ui_fact_evidence?:Record<string,Evidence>;tool_observations?:ToolObservation[];lead:{first_name:string|null;last_name:string|null;phone:string|null;email:string|null;budget_usd:number|null;purchase_timeframe:string|null;property_type:string|null;min_bedrooms:number|null;interest_unit_id:string|null};stage:string;turn_count:number;shortlisted_unit_ids:string[];booked_visits:Booking[];property_interests?:{unit_id:string;status:string;source_message_id?:string}[];booking_proposal?:{proposal_id:string;status:string;expires_at:string;options:{date:string;start_time:string}[]}|null;bp_episode?:{leads:{lead_profile_data:{sales_profile:{current:Record<string,Fact>}}}}};
 type Evidence={source_message_id?:string;message_id?:string;captured_at?:string;evidence?:string;source?:string};
 type ToolObservation={tool:string;status:string;fields:string[];timestamp:string;message_id?:string;error_code?:string|null;reason?:string|null;next_action?:string|null};
-type ProfilePreview={lead:State['lead'];stage:string;property_filters?:PropertyFilters;conversation_phase?:string;last_presented_units?:string[];answered_topics?:AnsweredTopic[];search_preferences?:SearchPreferences;recent_preferences_changes?:State['search_preferences_history'];confirmation_request?:State['confirmation_request'];last_offered_date?:string|null;conversation_focus?:State['conversation_focus'];visit_draft?:State['visit_draft'];last_slot_search?:State['last_slot_search'];exploring_unit_id?:string|null;property_interests:NonNullable<State['property_interests']>;facts:Record<string,Fact>;ui_fact_evidence:Record<string,Evidence>;tool_observations:ToolObservation[]};
+type ProfilePreview={lead:State['lead'];stage:string;active_search?:ActiveSearch|null;visit_planning_paused?:boolean;offered_assets?:Record<string,string[]>;property_filters?:PropertyFilters;conversation_phase?:string;last_presented_units?:string[];answered_topics?:AnsweredTopic[];search_preferences?:SearchPreferences;recent_preferences_changes?:State['search_preferences_history'];confirmation_request?:State['confirmation_request'];last_offered_date?:string|null;conversation_focus?:State['conversation_focus'];visit_draft?:State['visit_draft'];last_slot_search?:State['last_slot_search'];exploring_unit_id?:string|null;property_interests:NonNullable<State['property_interests']>;facts:Record<string,Fact>;ui_fact_evidence:Record<string,Evidence>;tool_observations:ToolObservation[]};
 type Message={id:string;role:'user'|'assistant';content:string;created_at:string;sequence_number?:number};
 type Lead={id:string;conversation_id:string;first_name:string;last_name:string;email:string;phone:string;updated_at:string;created_at:string;revision:number;state:State;messages:Message[]};
 type Summary={id:string;conversation_id:string;first_name:string;last_name:string;updated_at:string;last_message:string|null};
@@ -145,6 +146,13 @@ export default function Page(){
   const propertyFilters=liveProfile?.property_filters||state?.property_filters;
   const answeredTopics=liveProfile?.answered_topics||state?.answered_topics||[];
   const conversationPhase=liveProfile?.conversation_phase||state?.conversation_phase||'discovery';
+  const activeSearch=liveProfile?.active_search||state?.active_search;
+  const planningPaused=Boolean(liveProfile?.visit_planning_paused??state?.visit_planning_paused);
+  const phaseIndex=conversationPhase==='visit_planning'?2:conversationPhase==='property_details'?1:
+    conversationPhase==='follow_up'?3:0;
+  const phaseSteps=[{name:'Exploration',code:'exploration'},
+                    {name:'Details',code:'property_details'},
+                    {name:'Visit',code:'visit_planning'}];
   const focusCalendarDate=(liveProfile?.last_slot_search?.date||state?.last_slot_search?.date||visitDraft?.date||null);
   const profileFacts=liveProfile?.facts||state?.bp_episode?.leads?.lead_profile_data?.sales_profile?.current||{};
   const profileEvidence=liveProfile?.ui_fact_evidence||state?.ui_fact_evidence||{};
@@ -334,6 +342,25 @@ export default function Page(){
                 {propertyFilters.relative_price_gt!=null&&<div className="state-kv"><span>More expensive than</span><strong>{usd.format(propertyFilters.relative_price_gt)}</strong></div>}
               </div>}
               <small className="stage-label">{liveProfile?.stage||state.stage}</small>
+            </section>
+            <section className="state-section"><h3>Commercial journey</h3>
+              <div className="sales-journey" role="group" aria-label="Commercial journey phase">
+                {phaseSteps.map((step,i)=><div key={step.code} className={`sales-phase ${phaseIndex===i?'is-active':''} ${i<phaseIndex?'was-visited':''}`}
+                   aria-current={phaseIndex===i?'step':undefined}>
+                  <span className="sales-phase-index">{phaseIndex===i?<Check size={12}/>:i+1}</span>
+                  <strong>{step.name}</strong>
+                </div>)}
+              </div>
+              <div className="journey-summary"><span>Current activity</span><strong>{phaseSteps[phaseIndex]?.name||'Follow-up'} · {liveProfile?'provisional':'saved'}</strong></div>
+              {activeSearch&&<div className="active-search-panel">
+                <div className="active-search-head"><Search size={13}/><strong>{activeSearch.scope==='temporary'?'Temporary property search':'Saved preference search'}</strong><span>#{activeSearch.revision}</span></div>
+                {typeof activeSearch.criteria.bedrooms==='number'&&<small>{String(activeSearch.criteria.bedrooms)} bedrooms</small>}
+                {Array.isArray(activeSearch.criteria.bedrooms_any)&&<small>{activeSearch.criteria.bedrooms_any.join(' or ')} bedrooms</small>}
+                {typeof activeSearch.criteria.max_price_usd==='number'&&<small>Maximum {usd.format(activeSearch.criteria.max_price_usd)}</small>}
+                <small>{activeSearch.matching_unit_ids.length? 'Matches: '+activeSearch.matching_unit_ids.join(', '):'No matching properties'}</small>
+                {activeSearch.scope==='temporary'&&<small>Primary buyer preferences preserved</small>}
+              </div>}
+              {planningPaused&&visitDraft?.unit_id&&<div className="paused-visit-note"><CalendarDays size={13}/><span>Previous visit planning paused for <strong>{visitDraft.unit_id}</strong>. Its preferred day and hour are retained; availability must be checked again before booking.</span></div>}
             </section>
             <section className="state-section"><h3>Project focus</h3>
               <div className="state-kv"><span>Project</span><strong>{catalog?.project_info.name||'Not available'}</strong></div>
