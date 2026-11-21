@@ -138,7 +138,8 @@ def test_reschedule_preserves_original_and_creates_pending_replacement():
     next_slot = fresh['available_slots'][0]
     domain.begin_turn(state, f'I choose {next_slot["start_time"]} to reschedule H-201.')
     assert domain.select_visit_time(state, fresh['proposal_id'], next_slot['date'], next_slot['start_time'])['ok']
-    domain.begin_turn(state, 'Yes, please reschedule the H-201 visit to that offered hour.')
+    domain.end_turn(state, 'For H-201 on the newly selected date and hour, reply Yes, I confirm to reschedule. Confirm?')
+    domain.begin_turn(state, 'Yes, I confirm')
     res = domain.reschedule_visit(state, mid, 'Jamie', 'Park', 'jamie@example.test', '+51999999991',
                                   date_str=next_slot['date'], start_time=next_slot['start_time'],
                                   proposal_id=fresh['proposal_id'], unit_id='H-201')
