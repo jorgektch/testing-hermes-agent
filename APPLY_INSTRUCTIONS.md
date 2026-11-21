@@ -1,55 +1,78 @@
-# Hermes v13.2 — Diferencial para aplicación manual
+# Hermes v13.3 — Instalación diferencial manual
 
-**Sin PR, push, merge ni despliegue.** El ZIP contiene un **instalador diferencial con anclajes verificados** (no es un checkout completo). Debes aplicarlo sobre una copia local de `jorgektch/testing-hermes-agent` en la versión `main` **v13.1** previa a estos cambios. El script solo escribe archivos en el directorio local indicado y genera allí `v13_2_changes.patch` con un `git diff` unificado equivalente. No utiliza claves, conexión de red ni APIs.
+**Destino:** `jorgektch/testing-hermes-agent`, con el diferencial **v13.2 ya aplicado**. No ejecuta despliegues, no crea PR y no accede a GitHub, Vercel ni OpenRouter. Los cambios son locales y requieren tu commit manual.
 
-## Procedimiento
+## Contenido
 
-1. Conserva una copia de seguridad y comprueba que `git status --short` no muestre cambios previos; si los hay, haz commit o stash primero.
-2. Descomprime `hermes-v13.2-differential.zip` en una carpeta **fuera** del repositorio. Entra en la raíz de tu repositorio local.
-3. Opcionalmente, valida primero el módulo independiente sin acceso al repo: `python -m pytest -q /ruta/al/hermes-v13.2-differential/tests/test_continuity_standalone.py` (24 casos). Después ejecuta la **prevalidación**; si falla, el script no habrá modificado nada.
+| Archivo | Propósito |
+|---|---|
+| `apply.py` | Instalador incremental con preflight de anclajes, validación de sintaxis y patch unificado local |
+| `backend/app/property_options.py` | Opciones presentadas, ordinales, código/precio, listas con saltos de línea y recuperación segura |
+| `backend/tests/test_v13_3_option_selection.py` | Regresiones para el recorrido sintético de búsqueda, opción 2 y detalles |
+| `tests/` | Pruebas independientes del nuevo módulo y del instalador (sin conexión) |
+| `README.md` | Vista previa del README técnico-comercial actualizado; el instalador actualiza el README existente |
+| `frontend/src/app/globals.css` (modificado por el instalador) | Conserva los saltos de línea dentro de los elementos Markdown del chat |
+| `COMMIT_MESSAGE.txt` | Propuesta de commit en inglés |
+
+## Antes de aplicar
+
+1. Trabaja desde la raíz de una copia local de tu repositorio. Comprueba que el checkout ya incluye `backend/app/commercial_continuity.py` (introducido por **v13.2**) y que no hay cambios sin guardar: `git status --short`.
+2. Extrae este ZIP **fuera** del repositorio, por ejemplo en `~/Downloads/hermes-v13.3-differential`.
+3. Ejecuta las pruebas autónomas y el **dry-run** antes de modificar archivos:
 
 ```bash
-# Desde la raíz del repositorio; ajusta la ruta al ZIP descomprimido:
-python /ruta/al/hermes-v13.2-differential/apply.py --repo "$PWD" --dry-run
-python /ruta/al/hermes-v13.2-differential/apply.py --repo "$PWD"
+python -m pytest -q ~/Downloads/hermes-v13.3-differential/tests
+python ~/Downloads/hermes-v13.3-differential/apply.py --repo "$PWD" --dry-run
+```
 
+4. Si el preflight es correcto, aplica y revisa el diferencial:
+
+```bash
+python ~/Downloads/hermes-v13.3-differential/apply.py --repo "$PWD"
 git diff --check
 git status --short
-PYTHONPATH=backend python -m pytest -q backend/tests
-(cd frontend && npm ci && npm run build)
+git diff -- README.md backend/app frontend/src/app
 ```
 
-En **PowerShell**, usa la ruta absoluta del script y `--repo .`:
+El instalador deja `v13_3_changes.patch` en la raíz como **copia de revisión**. **No apliques ese patch otra vez**: los cambios ya estarán escritos por `apply.py`.
+
+### Windows / PowerShell
 
 ```powershell
-py C:\ruta\hermes-v13.2-differential\apply.py --repo . --dry-run
-py C:\ruta\hermes-v13.2-differential\apply.py --repo .
+py C:\ruta\hermes-v13.3-differential\apply.py --repo . --dry-run
+py C:\ruta\hermes-v13.3-differential\apply.py --repo .
 ```
 
-4. Revisa el contenido de `v13_2_changes.patch` y el `README.md` actualizado. `v13_2_changes.patch` es solo evidencia para inspección y **no** debe aplicarse nuevamente sobre los archivos ya transformados.
-5. Si las pruebas pasan, prepara el commit de forma **manual**, usando el texto incluido en `COMMIT_MESSAGE.txt`:
+## Validación completa en tu checkout
 
 ```bash
-git add README.md backend/app/commercial_continuity.py backend/app/commercial_turn.py \
-  backend/app/conversation_context.py backend/app/domain.py \
-  backend/app/delivery_policy.py backend/app/hermes_runtime.py backend/main.py \
-  backend/tests/test_v13_2_continuity.py frontend/src/app/page.tsx
-git commit -m "feat(hermes): preserve sales context across property searches and visits"
+PYTHONPATH=backend python -m pytest -q backend/tests
+(cd frontend && npm ci && npm run build)
+python -m compileall -q backend/app backend/tests
 ```
 
-## Contenido del diferencial
+Comprueba manualmente usando **solo leads sintéticos**:
 
-| Archivo | Cambio |
-|---|---|
-| `apply.py` | Transformaciones con comprobación de anclajes, vista previa y generación de patch local |
-| `backend/app/commercial_continuity.py` | Nuevo módulo: intención de calendario, contexto de visita, preferencias y excepciones |
-| `backend/tests/test_v13_2_continuity.py` | Regresiones de las transiciones de H-204, 8 AM, selección parcial, URLs y filtros |
-| `README.md` | Guía actualizada para negocio y arquitectura con diagramas Mermaid |
-| `COMMIT_MESSAGE.txt` | Mensaje sugerido de commit en inglés |
-| `tests/test_continuity_standalone.py` | Pruebas puras repetibles antes de modificar el checkout |
+1. `I am looking for a 2-bedroom house` → una ficha H-201, **sin numeración**.
+2. `Do you have any with 3 bedrooms?` → opciones `1. H-204` y `2. H-101`, en **líneas separadas** y con disponibilidad.
+3. `Option 2 its ok for me` → fase **Details**, H-101 (3 dormitorios, USD 320,000), sin nueva búsqueda H-201 ni agenda.
+4. `The first one`, `The $320k house`, `I prefer H-101` → referencia según menú presentado.
+5. Una búsqueda nueva reemplaza el menú antiguo. Una búsqueda sin resultados lo invalida; un ordinal ambiguo solicita el código en vez de adivinar.
+6. Las preferencias principales de dormitorios/presupuesto y cualquier cita existente se mantienen.
 
-Los cambios de los otros siete archivos se aplican por medio de `apply.py`. No modifica las fuentes sintéticas del catálogo ni datos existentes de la base de datos. Mantiene el historial de conversaciones y citas ya guardado.
+**Alcance de la validación entregada:** 38 pruebas autónomas del módulo y del instalador; sintaxis Python de los nuevos archivos y del patch generado sobre fuentes representativas. **No** se ejecutó la suite de integración completa ni la compilación de Next.js sobre un checkout real de la versión v13.2; haz ambas antes de incorporar el commit.
 
-## Validación y límites
+## Commit manual en inglés
 
-El diferencial superó una batería de pruebas **puras** de clasificación/continuidad y una simulación local de instalación en seco + aplicación sin red. **No se ha ejecutado toda la suite del repositorio ni la compilación Next.js con el checkout real**, porque el entorno de creación no tenía disponible una copia íntegra del repositorio. Debes ejecutar los comandos anteriores antes de utilizar la versión. Comprueba después con un lead **ficticio** el recorrido: $200k/2 dormitorios → alternativa H-204 → visita H-204 → otras fechas a las 8:00 → aceptación de las 9:00 sin día → fecha explícita → ubicación ilustrativa de Lima. Revisa los eventos de validación y los campos persistidos; no envíes SMS ni hagas citas físicas reales.
+```bash
+git add README.md \
+  backend/app/property_options.py backend/app/commercial_turn.py \
+  backend/app/conversation_context.py backend/app/domain.py \
+  backend/app/delivery_policy.py backend/app/hermes_runtime.py \
+  backend/app/sms.py backend/tests/test_v13_3_option_selection.py \
+  frontend/src/app/globals.css
+
+git commit -m "fix(hermes): preserve numbered property selections and readable listings"
+```
+
+No incluyas `v13_3_changes.patch` en el commit (es una copia local de revisión).

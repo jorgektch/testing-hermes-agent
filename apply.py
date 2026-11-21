@@ -1,629 +1,367 @@
 #!/usr/bin/env python3
-"""Apply the V13.2 differential to a LOCAL checkout of testing-hermes-agent.
+"""Apply Hermes v13.3 option-selection and readable-list differential LOCALLY.
 
-Read-only preflight on every targeted source file. No GitHub/Vercel access.
-Writes a reproducible changes.patch and only touches files named in the diff.
-Run: python /path/to/apply.py --repo /path/to/testing-hermes-agent --dry-run
-     python /path/to/apply.py --repo /path/to/testing-hermes-agent
+Targets a clean checkout with the earlier Hermes v13.2 differential applied.
+No network, GitHub, or deployment access. Writes a reviewable unified patch.
+    python apply.py --repo /path/to/testing-hermes-agent --dry-run
+    python apply.py --repo /path/to/testing-hermes-agent
 """
 from __future__ import annotations
-import argparse, difflib, pathlib, sys, hashlib, os
 
-ROOT=pathlib.Path(__file__).resolve().parent
+import argparse
+import ast
+import difflib
+from pathlib import Path
 
-class PatchError(RuntimeError):pass
+ROOT = Path(__file__).resolve().parent
 
-class Editor:
-    def __init__(self,path,text):self.path,self.text,self.count=path,text,0
-    def replace(self,needle,replacement,*,n=1):
-        seen=self.text.count(needle)
-        if seen!=n:raise PatchError(f'{self.path}: expected {n} occurrences, found {seen}: {needle[:110]!r}')
-        self.text=self.text.replace(needle,replacement)
-        self.count+=1
-    def before(self,anchor,insert):self.replace(anchor,insert+anchor)
-    def after(self,anchor,insert):self.replace(anchor,anchor+insert)
-    def at_function_end(self,head,foot,insert):
-        start=self.text.find(head)
-        end=self.text.find(foot,start+len(head))
-        if start<0 or end<0:raise PatchError(f'{self.path}: function boundary missing')
-        self.text=self.text[:end]+insert+self.text[end:];self.count+=1
+class PatchError(RuntimeError):
+    pass
+
+class Edit:
+    def __init__(self, path: str, source: str):
+        self.path = path
+        self.text = source
+
+    def replace(self, before: str, after: str, *, n: int = 1):
+        hits = self.text.count(before)
+        if hits != n:
+            raise PatchError(f'{self.path}: expected {n} matching anchors, got {hits}: {before[:130]!r}')
+        self.text = self.text.replace(before, after)
+
+    def insert_before(self, anchor: str, text: str):
+        self.replace(anchor, text + anchor)
+
+    def insert_after(self, anchor: str, text: str):
+        self.replace(anchor, anchor + text)
+
+    def function_body_insert(self, name: str, anchor: str, text: str):
+        start = self.text.find(f'def {name}(')
+        if start < 0:
+            raise PatchError(f'{self.path}: missing function {name}')
+        end = self.text.find('\ndef ', start + 4)
+        if end < 0:
+            end = len(self.text)
+        fragment = self.text[start:end]
+        if fragment.count(anchor)!=1:
+            raise PatchError(f'{self.path}: {name} expected one {anchor[:60]!r}, got {fragment.count(anchor)}')
+        self.text=self.text[:start]+fragment.replace(anchor,anchor+text)+self.text[end:]
 
 
-def commercial(text):
-    e=Editor('backend/app/commercial_turn.py',text)
-    e.after('import re\n', '\nfrom . import commercial_continuity as continuity\n')
-    e.replace('    text=str(message or \'\')\n    if _BOOKING.search(text) and not _SEARCH.search(text):',
-              '    text=str(message or \'\')\n    if continuity.is_calendar_question(text):\n        return False\n    if _BOOKING.search(text) and not _SEARCH.search(text):')
-    e.replace('def intent(message: str) -> str:\n    text=str(message or \'\')\n    if search_request(text):',
-              '''def intent(message: str, state: dict | None = None) -> str:
-    text=str(message or '')
-    state=state or {}
-    draft=state.get('visit_draft') or {}
-    if continuity.is_calendar_question(text,has_visit=bool(draft.get('unit_id')),
-                                      phase=state.get('conversation_phase','')):
-        return 'visit_planning'
-    if (draft.get('unit_id') and continuity.explicitly_selected_date(
-            text,state.get('last_offered_dates') or [])):
-        return 'visit_planning'
-    if search_request(text):''')
-    e.replace('    if search_request(message):\n        return None\n    return conversation_context.topic(message)',
-              '''    if search_request(message) or continuity.is_calendar_question(message):
-        return None
-    return conversation_context.topic(message)''')
+def commercial(source: str) -> str:
+    e=Edit('backend/app/commercial_turn.py',source)
+    e.insert_after('from . import commercial_continuity as continuity\n', 'from . import property_options\n')
+    e.replace('    if continuity.is_calendar_question(text):\n        return False\n',
+              '    if property_options.is_option_selection(text):\n        return False\n    if continuity.is_calendar_question(text):\n        return False\n')
+    e.replace('    state=state or {}\n    draft=state.get(\'visit_draft\') or {}',
+              "    state=state or {}\n    if property_options.is_option_selection(text):\n        return 'property_selection'\n    draft=state.get('visit_draft') or {}")
     return e.text
 
 
-def context(text):
-    e=Editor('backend/app/conversation_context.py',text)
-    e.replace("_CODE = re.compile(r'(?<![A-Z0-9])H-\\d{3}(?![A-Z0-9])', re.I)",
-              "_CODE = re.compile(r'(?<![A-Z0-9])H[- ]?(\\d{3})(?![A-Z0-9])', re.I)")
-    e.replace("    return list(dict.fromkeys(code.upper() for code in _CODE.findall(text or '')\n                              if code.upper() in units))",
-              "    return list(dict.fromkeys('H-'+m.group(1) for m in _CODE.finditer(text or '')\n                              if 'H-'+m.group(1) in units))")
-    e.replace('def resolved_reference(state: dict, text: str, units: dict[str, dict]) -> dict[str, Any]:',
-              'def resolved_reference(state: dict, text: str, units: dict[str, dict], *,\n                       prefer_visit: bool = False) -> dict[str, Any]:')
-    e.replace("    if len(named)>1:\n        return {'unit_id':None,'reason':'multiple_explicit_units','ambiguous':True,\n                'candidates':named}\n    recent=",
-              """    if len(named)>1:
-        return {'unit_id':None,'reason':'multiple_explicit_units','ambiguous':True,
-                'candidates':named}
-    if prefer_visit:
-        draft=(state.get('visit_draft') or {})
-        if draft.get('unit_id') in units and draft.get('status') not in ('idle','confirmed'):
-            return {'unit_id':draft['unit_id'],'reason':'active_visit_draft','ambiguous':False}
-    recent=""")
+def context(source: str) -> str:
+    e=Edit('backend/app/conversation_context.py',source)
+    e.insert_after('from typing import Any\n','\nfrom . import property_options\n')
+    # Explicit property code keeps its existing highest priority. Before the
+    # legacy ordinal resolver, inspect the buyer-visible ordered snapshot.
+    e.replace("    recent=[c for c in (state.get('last_presented_units') or []) if c in units]",
+              """    if property_options.is_option_selection(text):
+        selected=property_options.resolve_selection(state,text)
+        if selected is not None:
+            return selected
+    recent=[c for c in (state.get('last_presented_units') or []) if c in units]""")
     return e.text
 
 
-def domain(text):
-    e=Editor('backend/app/domain.py',text)
-    e.replace('from . import scheduling, sales_preferences, conversation_context, property_filters, commercial_turn, search_sessions',
-              'from . import scheduling, sales_preferences, conversation_context, property_filters, commercial_turn, search_sessions, commercial_continuity as continuity')
-    e.replace("        'active_search': None,\n", """        'active_search': None,
-        'preference_update_proposals': {},
-        'last_offered_dates': [],
-""")
-    e.replace("    draft = _draft(state)\n    if draft.get('unit_id') != code:\n        draft.update(unit_id=code, date=None, start_time=None,proposal_id=None,status='day_needed')",
-              """    draft = _draft(state)
-    if draft.get('unit_id') != code:
-        # Preserve only *preferences* across a house switch; prior slots,
-        # offers and consent never transfer to another property.
-        pref_day=draft.get('date') or draft.get('preferred_date')
-        pref_time=draft.get('start_time') or draft.get('preferred_start_time')
-        draft.update(unit_id=code, date=None, start_time=None,proposal_id=None,
-                     status='day_needed',preferred_date=pref_day,
-                     preferred_start_time=pref_time)
-        state['last_offered_dates']=[]""")
-    e.replace("    resolution=conversation_context.resolved_reference(state,message,known)\n    state['_turn_property_resolution']=resolution",
-              """    draft=_draft(state)
-    old_unit=draft.get('unit_id')
-    new_visit=continuity.is_new_visit_request(message)
-    calendar_followup=(state.get('_turn_intent')=='visit_planning' and
-        bool(old_unit) and not new_visit)
-    resolution=conversation_context.resolved_reference(
-        state,message,known,prefer_visit=calendar_followup)
-    # A buyer explicitly naming a house in a calendar question is NOT
-    # permission to switch an existing visit unless they request that switch.
-    if calendar_followup and old_unit in known and resolution.get('unit_id') != old_unit:
-        state['_calendar_reference_conflict']={
-            'current_visit_unit_id':old_unit,
-            'mentioned_unit_id':resolution.get('unit_id')}
-        resolution={'unit_id':old_unit,'reason':'active_visit_guard','ambiguous':False}
-    state['_turn_property_resolution']=resolution""")
-    e.replace("    if visit_intent and not negated and resolution.get('unit_id') and not resolution.get('ambiguous'):\n        _set_visit_unit(state,resolution['unit_id'])\n        state['conversation_phase']='visit_planning'",
-              """    if (visit_intent and not negated and resolution.get('unit_id') and
-            not resolution.get('ambiguous') and
-            (not old_unit or new_visit or continuity.explicit_visit_switch(
-                message,resolution.get('unit_id'),old_unit))):
-        # Follow-up hours/days never silently switch house.
-        _set_visit_unit(state,resolution['unit_id'])
-        state['conversation_phase']='visit_planning'
-    elif calendar_followup and old_unit:
-        state['conversation_phase']='visit_planning'""")
-    e.replace("    state['_turn_intent']=commercial_turn.intent(message)",
-              "    state['_turn_intent']=commercial_turn.intent(message,state)")
-    e.replace("    dialogue=state['bp_episode']['sales_dialogue_states']['state_json']\n    memory=dialogue.setdefault('memory',{})",
-              """    if topic in ('gallery','documents') and unit_id in _units_by_code():
-        approved=state.get('_approved_media_urls_this_turn') or []
-        if any(url in reply for url in approved):
-            state.setdefault('answered_topics',[]).append({
-                'unit_id':unit_id,'topic':topic,
-                'source_message_id':state.get('_active_source_message_id'),
-                'reply_message_id':state['bp_episode']['sales_messages'][-1]['id'],
-                'recorded_at':now_local().isoformat()})
-            state['answered_topics']=state['answered_topics'][-80:]
-    dialogue=state['bp_episode']['sales_dialogue_states']['state_json']
-    memory=dialogue.setdefault('memory',{})""")
-    e.replace("    _observe_inbound_context(state, message)\n    bp['sales_messages'].append({",
-              """    _observe_inbound_context(state, message)
-    # Store only *explicit* property interest, even if Hermes omits a tool.
-    # An assistant's last mention is never evidence of lead interest.
-    resolution=state.get('_turn_property_resolution') or {}
-    code=resolution.get('unit_id')
-    if code in _units_by_code() and not resolution.get('ambiguous'):
-        declared=bool(re.search(r"\\b(?:i(?: am|'m)? interested|i(?: would|'d)? like to visit|"
-                                r"i want to visit|i'd like to tour|schedule a visit)\\b",message,re.I))
-        if declared:
-            status='visit_requested' if continuity.is_new_visit_request(message) else 'interested'
-            continuity.register_interest(state,_units_by_code()[code],
-                source_message_id=state.get('_active_source_message_id'),status=status)
-            continuity.maybe_propose_preference_update(state,_units_by_code()[code],
-                source_message_id=state.get('_active_source_message_id'))
-    bp['sales_messages'].append({""")
-    # Do not falsely convert old proposal into fresh visit when only partial hour accepted.
-    e.replace("    day=state.get('last_offered_date')\n    # An explicitly specified YYYY-MM-DD may override the last offered day.",
-              """    day=state.get('last_offered_date')
-    # A buyer accepting a single hour after multiple *days* were presented
-    # has not selected a day. Record the time as a preference only.
-    offered_days=state.get('last_offered_dates') or []
-    if (len(set(offered_days))>1 or _draft(state).get('date_context_ambiguous')) and not continuity.explicitly_selected_date(text,offered_days):
-        _draft(state)['preferred_start_time']=times[0]
-        _draft(state)['preferred_date']=_draft(state).get('date') or _draft(state).get('preferred_date')
-        _draft(state).update(date=None,start_time=None,proposal_id=None,status='day_needed')
-        state['confirmation_request']=None
-        return {'ok':True,'captured':False,'preferred_start_time':times[0],
-                'day_needed':True}
-    # An explicitly specified YYYY-MM-DD may override the last offered day.""")
-    e.replace("    # An explicitly specified YYYY-MM-DD may override the last offered day.\n    specified=re.search(r'\\b20\\d{2}-\\d{2}-\\d{2}\\b',text)\n    if specified:day=specified.group(0)",
-              """    # Choose a date mentioned in the offered dates, never a stale one.
-    selected_day=continuity.explicitly_selected_date(text,offered_days)
-    if selected_day:day=selected_day
-    specified=re.search(r'\\b20\\d{2}-\\d{2}-\\d{2}\\b',text)
-    if specified:day=specified.group(0)""")
-    e.replace("    if proposal.get('selected_unit_id')!=_draft(state).get('unit_id'):\n        return {'error':'This offer belongs to a different property from the current visit draft.'}",
-              """    if proposal.get('selected_unit_id')!=_draft(state).get('unit_id'):
-        return {'error':'This offer belongs to a different property from the current visit draft.'}
-    offered_days=state.get('last_offered_dates') or []
-    if (len(set(offered_days))>1 or _draft(state).get('date_context_ambiguous')) and not continuity.explicitly_selected_date(
-            str(state.get('_active_source_message_text') or ''),offered_days):
-        return {'error':'The buyer has chosen a preferred hour but not a date.',
-                'error_code':'VISIT_DAY_REQUIRED',
-                'next_action':'Ask only which day to use. Never infer the prior date.'}""")
-    e.replace("    state['confirmation_request']=None\n    state['bp_episode']['sales_dialogue_states']['state_json']['booking_proposal'] = copy.deepcopy(proposal)",
-              """    state['confirmation_request']=None
-    state['last_offered_dates']=[parsed_day]
-    state['bp_episode']['sales_dialogue_states']['state_json']['booking_proposal'] = copy.deepcopy(proposal)""")
-    e.replace("    pol = scheduling.policy()\n    today = scheduling.local_now().date()\n", """    pol = scheduling.policy()
-    today = scheduling.local_now().date()
-""")  # syntactic guard
-    e.replace("def slots(state: dict, date_str: str | None = None, *,\n          time_preference: str | None = None, extra_occupied: dict | None = None) -> dict:",
-              """def slots(state: dict, date_str: str | None = None, *,
-          time_preference: str | None = None,
-          requested_start_time: str | None = None,
-          extra_occupied: dict | None = None) -> dict:""")
-    e.replace("    spoken = str(state.get('_active_source_message_text') or '').lower()\n    if time_preference is None:",
-              """    spoken = str(state.get('_active_source_message_text') or '').lower()
-    if date_str is None and state.get('_turn_intent')=='visit_planning':
-        last_requested=(state.get('last_slot_search') or {}).get('requested')
-        if last_requested in ('next week','this week','this weekend','next weekend'):
-            date_str=last_requested
-    if requested_start_time is None and state.get('_turn_intent')=='visit_planning':
-        requested_start_time=continuity.clock_value(spoken)
-    if requested_start_time is not None:
-        try:
-            requested_start_time=time.fromisoformat(requested_start_time).strftime('%H:%M')
-        except (TypeError,ValueError):
-            return _slot_error('INVALID_START_TIME',
-                'Choose a real clock time, for example 08:00.',unit_id,
-                next_action='Clarify only the requested clock time.')
-    if time_preference is None:""")
-    e.replace("        if not low <= exact_date <= high:\n", """        if (draft.get('date_context_ambiguous') and
-                len(set(state.get('last_offered_dates') or []))>1 and
-                continuity.explicitly_selected_date(
-                    spoken,state.get('last_offered_dates') or [])!=exact_date.isoformat()):
-            return _slot_error('VISIT_DAY_REQUIRED',
-                'The buyer accepted an hour but has not selected a day.',
-                unit_id,next_action='Ask which day to use; do not reuse an older exact date.')
-        if not low <= exact_date <= high:
-""")
-    e.replace("    relative = _relative_range(date_str, today) if date_str else None",
-              """    # 'Other days that week' must search the whole anchored week,
-    # never just the old explicit day accidentally passed by the model.
-    if re.search(r'\\b(?:other|remaining|different)\\s+(?:days?|dates?)\\b',spoken,re.I):
-        anchor=state.get('last_offered_date') or draft.get('preferred_date') or draft.get('date')
-        if anchor:
-            try:
-                anchor_day=date.fromisoformat(anchor)
-                date_str=('next week' if anchor_day.isocalendar()[:2]!=today.isocalendar()[:2]
-                          else 'this week')
-            except ValueError:
-                pass
-    relative = _relative_range(date_str, today) if date_str else None""")
-    e.replace("    key = json.dumps([unit_id, date_str, time_preference], sort_keys=True)",
-              "    key = json.dumps([unit_id, date_str, time_preference, requested_start_time], sort_keys=True)")
-    e.replace("    options = scheduling.public_start_times([x for x in all_slots if within(x)])\n    if exact_date is None:\n        days = []\n        for day_value in sorted({x['date'] for x in options})[:4]:",
-              """    all_period=scheduling.public_start_times([x for x in all_slots if within(x)])
-    options=([x for x in all_period if x['start_time']==requested_start_time]
-             if requested_start_time else all_period)
-    if exact_date is None:
-        days = []
-        for day_value in sorted({x['date'] for x in options}):""")
-    e.replace("        if not days:\n            result = _slot_error('NO_SLOTS',\n                'No visit dates match the requested period for ' + unit_id + '.',\n                unit_id, next_action='Ask for another period or time of day; keep the house context.')\n        else:\n            result = {'ok': True, 'unit_id': unit_id, 'available_dates': days,\n                       'proposal_id': None, 'timezone': pol['timezone'],\n                       'next_action': 'Ask which date the buyer prefers for ' + unit_id +\n                                      ', then search that exact day for hours.'}",
-              """        if not days and requested_start_time:
-            earliest=min((s['start_time'] for s in all_period),default=None)
-            result={'ok':True,'status':'no_slots_at_requested_time',
-                    'unit_id':unit_id,'requested_start_time':requested_start_time,
-                    'requested_period':{'start':range_start.isoformat(),
-                                        'end':range_end.isoformat()},
-                    'available_dates':[],'earliest_available_start':earliest,
-                    'proposal_id':None,'timezone':pol['timezone'],
-                    'next_action':'Explain that the requested hour is unavailable across the entire period; offer a verified alternative hour.'}
-        elif not days:
-            result = _slot_error('NO_SLOTS',
-                'No visit dates match the requested period for ' + unit_id + '.',
-                unit_id, next_action='Ask for another period or time of day; keep the house context.')
+def domain(source: str) -> str:
+    e=Edit('backend/app/domain.py',source)
+    e.insert_after('from . import scheduling, sales_preferences, conversation_context, property_filters, commercial_turn, search_sessions, commercial_continuity as continuity\n',
+                   'from . import property_options\n')
+    e.replace("        'active_search': None,\n", "        'active_search': None,\n        'last_presented_property_options': None,\n")
+    e.insert_after("    state['_turn_property_resolution']=resolution\n", """    if state.get('_turn_intent')=='property_selection':
+        # The buyer chose a previously displayed option, not a new search or
+        # an appointment. This transition is independent of visit_draft.
+        selected=resolution.get('unit_id')
+        if selected in known and not resolution.get('ambiguous'):
+            draft=_draft(state)
+            if draft.get('unit_id') and draft.get('status') not in ('idle','confirmed'):
+                # Leave the old draft intact, but never allow a stale recap's
+                # confirmation prompt to carry into a new property topic.
+                state['visit_planning_paused']=True
+                state['confirmation_request']=None
+                state['pending_visit_offer']=None
+            _set_focus(state,selected)
+            state['conversation_phase']='property_details'
+            state['stage']='Exploring property details'
+            track_property_interest(state,selected,'considering')
+            # Suggest (once) updating mismatched permanent filters, without
+            # changing them or blocking details/visits.
+            continuity.maybe_propose_preference_update(
+                state,known[selected],source_message_id=state.get('_active_source_message_id'))
+            state['_selected_property_option_this_turn']={
+                'unit_id':selected,
+                'display_number':resolution.get('display_number'),
+                'source_reply_message_id':resolution.get('source_reply_message_id')}
         else:
-            result = {'ok': True, 'unit_id': unit_id, 'available_dates': days,
-                       'status':'available','requested_start_time':requested_start_time,
-                       'requested_period':{'start':range_start.isoformat(),
-                                           'end':range_end.isoformat()},
-                       'proposal_id': None, 'timezone': pol['timezone'],
-                       'next_action': 'Ask which date the buyer prefers for ' + unit_id +
-                                      ', then search that exact day for hours.'}
-        state['last_offered_dates']=[d['date'] for d in days]
-        # Broad period searches invalidate an older *chosen* day without
-        # discarding it as a preference. No old proposal can be confirmed.
-        draft['date_context_ambiguous']=True
-        if draft.get('date') and state.get('_turn_intent')=='visit_planning':
-            draft['preferred_date']=draft['date']
-            draft.update(date=None,start_time=None,proposal_id=None,status='day_needed')
-            state['confirmation_request']=None
-        if requested_start_time:
-            draft['preferred_start_time']=requested_start_time""")
-    e.replace("                                     'time_preference': time_preference,\n                                     'result_code': 'OK' if result.get('ok') else 'NO_SLOTS'}",
-              """                                     'time_preference': time_preference,
-                                     'requested_start_time':requested_start_time,
-                                     'result_code':('NO_SLOTS_AT_EXACT_TIME' if result.get('status')=='no_slots_at_requested_time'
-                                                    else 'OK' if result.get('ok') else 'NO_SLOTS')}""")
-    e.replace("    if not options:\n        # A failed exploratory search must not delete a previously selected hour.",
-              """    if not options and requested_start_time:
-        earliest=min((s['start_time'] for s in all_period),default=None)
-        result={'ok':True,'status':'no_slots_at_requested_time',
-                'unit_id':unit_id,'date':exact_date.isoformat(),
-                'requested_start_time':requested_start_time,
-                'earliest_available_start':earliest,'available_slots':[],
-                'proposal_id':None,'timezone':pol['timezone']}
-        state['last_slot_search']={'unit_id':unit_id,'requested':date_str,
-            'date':exact_date.isoformat(),'requested_start_time':requested_start_time,
-            'result_code':'NO_SLOTS_AT_EXACT_TIME'}
-        queries[key]=copy.deepcopy(result)
-        return result
-    if not options:
-        # A failed exploratory search must not delete a previously selected hour.""")
-    e.replace("    state['last_offered_date'] = exact_date.isoformat()\n", "    state['last_offered_date'] = exact_date.isoformat()\n    state['last_offered_dates']=[exact_date.isoformat()]\n    draft['date_context_ambiguous']=False\n")
-    # Ignore active_search in a detail/booking screen but preserve historical data.
-    e.replace("        'active_search':copy.deepcopy(state.get('active_search')),\n", """        'active_search':copy.deepcopy(state.get('active_search')),
-        'preference_update_proposals':copy.deepcopy(state.get('preference_update_proposals') or {}),
-        'last_offered_dates':list(state.get('last_offered_dates') or []),
-""")
-    e.replace("    state.pop('_turn_property_resolution', None)\n", """    state.pop('_turn_property_resolution', None)
-    state.pop('_calendar_reference_conflict', None)
-""")
-    # Offer-response projection: buyer consent to a suggested profile change
-    # uses the same canonical BP fact/evidence format as a direct declaration.
-    e.before("def _selected_offer(state: dict) -> dict | None:", """def _sync_preference_projection(state:dict,result:dict,message:str) -> None:
-    if not result.get('ok') or not result.get('changed_fields'):
+            state['_turn_property_ambiguous']=True
         return
-    facts={}
-    prefs=_preferences(state)
-    if 'budget' in result['changed_fields']:
-        budget=prefs['budget']
-        if budget.get('maximum_usd') is not None:
-            facts['budget_maximum']=budget['maximum_usd']
-        facts['budget']=f"USD {budget.get('minimum_usd') or 'unset'} to {budget.get('maximum_usd') or 'unset'} ({budget['mode']})"
-        state.setdefault('ui_fact_evidence',{})['budget_usd']={
-            'source_message_id':state.get('_active_source_message_id'),
-            'evidence':message,'captured_at':now_local().isoformat(),
-            'source':'active_conversation'}
-    if 'bedrooms' in result['changed_fields']:
-        beds=prefs['bedrooms']
-        facts['bedrooms']=next((n for n in (beds['preferred'],beds['minimum'],beds['maximum'])
-                               if n is not None),None)
-        state.setdefault('ui_fact_evidence',{})['min_bedrooms']={
-            'source_message_id':state.get('_active_source_message_id'),
-            'evidence':message,'captured_at':now_local().isoformat(),
-            'source':'active_conversation'}
-    _capture_bp_facts(state,facts)
-    state['stage']='Preferences updated'
-    record(state,'preferences_updated',
-           f"Buyer accepted offered changes to {', '.join(result['changed_fields'])}")
-
-
 """)
-
-    e.replace("    rank = {'discussed': 0, 'considering': 1, 'interested': 2}",
-              "    rank = {'discussed': 0, 'considering': 1, 'interested': 2, 'visit_requested': 3}")
-    # auto-registered visit_requested cannot be overwritten by an older generic
-    # track_property_interest call from Hermes.
-    # Preserve phase on a detail request after any harmless search history.
+    e.replace("    new_mentions=conversation_context.presented_units(reply,_units_by_code())\n", """    if (state.get('_turn_intent') in ('property_search','preference_update') and
+            state.get('_matching_options_this_turn') is not None):
+        options=property_options.delivered_snapshot(
+            state['_matching_options_this_turn'],reply,
+            search_revision=(state.get('active_search') or {}).get('revision'),
+            reply_message_id=bp['sales_messages'][-1]['id'])
+        # No match or omitted item means an old menu must not remain selectable.
+        state['last_presented_property_options']=options
+        if options:
+            state['last_presented_units']=[o['unit_id'] for o in options['options']]
+    new_mentions=conversation_context.presented_units(reply,_units_by_code())
+""")
+    e.replace("    state.pop('_search_tool_called_this_turn', None)\n",
+              "    state.pop('_search_tool_called_this_turn', None)\n    state.pop('_selected_property_option_this_turn', None)\n")
+    # Legacy catalog evaluation must not reinterpret a numbered choice as a
+    # fresh buyer search (the primary-profile search would reinsert H-201).
+    e.function_body_insert('evaluate_properties',
+         "    lead = state.get('lead', {})\n",
+         """    if state.get('_turn_intent')=='property_selection':
+        return {'error':'The buyer selected an existing option, not a search.',
+                'error_code':'PROPERTY_SELECTION_NOT_SEARCH',
+                'next_action':'Use get_unit_details for the resolved property.'}
+""")
+    e.replace("    utterance=str(state.get('_active_source_message_text') or '')\n",
+              """    if state.get('_turn_intent')=='property_selection':
+        return {'error':'The buyer selected a displayed property, not a new search.',
+                'error_code':'PROPERTY_SELECTION_NOT_SEARCH',
+                'next_action':'Use get_unit_details for the resolved unit.'}
+    utterance=str(state.get('_active_source_message_text') or '')
+""")
+    e.function_body_insert('slots', '    known = _units_by_code()\n', """    if state.get('_turn_intent')=='property_selection':
+        return _slot_error('VISIT_NOT_REQUESTED',
+            'The buyer asked about a property; no visit was requested.',
+            next_action='Give the selected property details. Only check slots if the buyer asks to visit.')
+""")
+    e.replace("    if status == 'interested' and state.get('_active_source_message_id'):\n",
+              """    if status == 'interested' and state.get('_turn_intent')=='property_selection':
+        # An ordinal choice authorizes exploring details, not a visit or a
+        # stronger declaration of interest from the agent.
+        return {'error':'A displayed option was selected for details, not a visit.',
+                'error_code':'INTEREST_LEVEL_NOT_DECLARED',
+                'next_action':'The domain has already recorded considering status.'}
+    if status == 'interested' and state.get('_active_source_message_id'):
+""")
+    e.insert_after("        'active_search':copy.deepcopy(state.get('active_search')),\n",
+                   "        'last_presented_property_options':copy.deepcopy(state.get('last_presented_property_options')),\n")
     return e.text
 
 
-def policy(text):
-    e=Editor('backend/app/delivery_policy.py',text)
-    e.after('from . import sms\n','from . import commercial_continuity as continuity\n')
-    e.before('def validate_outbound(reply: str, state: dict) -> str:', '''def _safe_location_reply(state:dict) -> str:
-    from . import domain
-    ref=state.get('_turn_property_resolution') or {}
-    code=ref.get('unit_id') or (state.get('visit_draft') or {}).get('unit_id')
-    unit=domain._units_by_code().get(code) if code else None
-    if not unit:
-        return 'I can share the published location once we have a specific house in mind.'
-    loc=unit.get('location') or {}
-    city=loc.get('city') or 'Lima'
-    # This specific public city reference is from the approved catalogue.
-    map_link=(loc.get('maps_url') if loc.get('map_scope')=='city_reference_only'
-              and loc.get('verification_status')=='synthetic' else None)
-    return (f'{code} is listed in {city}, Peru (synthetic demo). '
-            'We have only a city-level reference, not a verified address '
-            'or visit pin.'+
-            (f' Illustrative city map: {map_link}' if map_link else ''))
+def policy(source: str) -> str:
+    e=Edit('backend/app/delivery_policy.py',source)
+    e.insert_after('from . import commercial_continuity as continuity\n', 'from . import property_options\n')
+    # Replace only the fallback's former formatting policy. Other guardrails
+    # and the no-matches/alternative behavior stay unchanged.
+    start=e.text.find('def _matching_reply(')
+    end=e.text.find('\ndef _no_matches_for_state(',start)
+    if start<0 or end<0:
+        raise PatchError('backend/app/delivery_policy.py: matching reply function boundary not found')
+    e.text=e.text[:start]+'''def _matching_reply(matches: list[dict], alternatives: list[dict] | None = None) -> str:
+    """Verified menu fallback with visible ordinal-to-unit mapping."""
+    alternatives=alternatives or []
+    if matches:
+        return property_options.render_matches(matches)
+    if alternatives:
+        alt=alternatives[0]
+        return (f'No exact match. Optional alternative: {alt["unit_id"]} '
+                f'({alt["bedrooms"]} bedrooms, ${int(alt["price_usd"]):,}), '
+                'which differs from your preferences. Would you like its details?')
+    return 'No houses meet every preference right now. Would you like to adjust a criterion?'
+
+''' + e.text[end:]
+    # Check buyer selection before any search-recovery fallback; no URL or
+    # booking guard is relaxed. The backend can recover an erroneous LLM call
+    # using only public published facts of the selected unit.
+    e.insert_before('    # The language model cannot promote a selected hour to a confirmed visit.\n', '''    if state.get('_turn_intent')=='property_selection':
+        from . import domain
+        resolved=state.get('_turn_property_resolution') or {}
+        unit=domain._units_by_code().get(resolved.get('unit_id'))
+        if unit and not resolved.get('ambiguous'):
+            if property_options.needs_selection_repair(plain,unit):
+                plain=property_options.selected_property_reply(unit)
+                state.setdefault('tool_observations',[]).append({
+                    'tool':'selected_property_reply_recovery',
+                    'status':'recovered','fields':['selected_unit_id'],
+                    'message_id':state.get('_active_source_message_id'),
+                    'timestamp':domain.now_local().isoformat()})
+            _record_sent_media(state,plain)
+            return _offer_preferences_after_interest(
+                state,_suggest_available_assets(state,plain))
+        return ('Which house would you like to explore? '
+                'Please use its code, for example H-101.')
+''')
+    # The model can use different language, but the actual search listing
+    # must contain every shown code, correct order and clear line breaks.
+    # The earlier selection branch also records media, so patch the final
+    # delivery path only (not the early property-selection return).
+    anchor='    _record_sent_media(state,plain)\n'
+    position=e.text.rfind(anchor)
+    if position < 0:
+        raise PatchError('backend/app/delivery_policy.py: final media-recording anchor missing')
+    e.text=e.text[:position]+'''    if commercial_search and search_results:
+        if property_options.needs_listing_repair(plain,search_results):
+            plain=property_options.render_matches(search_results)
+'''+e.text[position:]
+    return e.text
 
 
-def _safe_url_recovery(state:dict, plain:str, urls:list[str]) -> str:
-    """Fail closed on links while keeping a harmless, useful buyer reply."""
-    topic=(state.get('_last_inbound_topic') or '')
-    question=str(state.get('_active_source_message_text') or '')
-    if topic=='location' or re.search(r'\\b(?:address|location|maps?|where is|directions)\\b',question,re.I):
-        return _safe_location_reply(state)
-    safe=plain
-    for link in urls:
-        safe=safe.replace(link,'')
-    safe=re.sub(r'\\s{2,}',' ',safe).strip(' ,;:-')
-    if not safe or re.search(r'\\b(?:click here|download here|use this link|follow this link)\\b|^\\s*(?:download|click|link)\\s*$',safe,re.I):
-        return ('I can share the approved property details or media. '
-                'Which resource would you like?')
-    # Don't let an arbitrary URL that was stripped imply a verified address.
-    return safe
+def hermes(source: str) -> str:
+    e=Edit('backend/app/hermes_runtime.py',source)
+    e.insert_after('- Prefer answering with the most relevant 1-3 matches: property code, bedroom\n  count, price and one relevant distinction. Ask which to explore only after\n  answering the buyer\'s question. If nothing matches, say so clearly.\n',
+     '''- Present one match WITHOUT an ordinal number. For two or more matches,
+  display an ordered list: "1. H-204 - Name" and "2. H-101 - Name", one item
+  per paragraph with real newlines, price and availability. End by offering
+  details of an option OR further exploration with new criteria.
+- When the buyer replies "Option 2", "the second one", or "the $320k house",
+  that is a SELECTION of an already shown option, NOT a new property search.
+  Answer the details of the selected property; do not call search_properties,
+  visit slots or booking. Selection for details is not appointment consent.
+''')
+    e.insert_after("        'last_presented_units':state.get('last_presented_units',[]),\n",
+                   "        'last_presented_property_options':state.get('last_presented_property_options'),\n        'selected_property_option':state.get('_selected_property_option_this_turn'),\n")
+    return e.text
 
 
-def _offer_preferences_after_interest(state:dict,plain:str) -> str:
-    from . import domain
-    code=(state.get('_turn_property_resolution') or {}).get('unit_id')
-    if not code or state.get('_turn_intent') in ('property_search','visit_planning','booking_action'):
-        return plain
-    unit=domain._units_by_code().get(code)
-    if not unit:return plain
-    advisory=continuity.preference_offer_text(state,unit)
-    if not advisory:return plain
-    # One question about relevant criteria, never a blocking confirmation.
-    if len(plain)>310:
-        return plain
-    offer=state['preference_update_proposals'][code]
-    offer['status']='offered'
-    offer['offered_message_id']=state.get('_active_source_message_id')
-    return plain.rstrip()+' '+advisory
+def sms(source: str) -> str:
+    e=Edit('backend/app/sms.py',source)
+    anchor="    if details(plain)['segments'] == 1:\n        return [plain]\n"
+    e.insert_after(anchor, """    if '\\n' in plain:
+        # Preserve the readable property menu for delivery by SMS, too.
+        # Splitting on its blank lines is safe; recombining with spaces would
+        # turn '1. ... 2. ...' into an ambiguous run-on paragraph.
+        paragraphs=[p.strip() for p in re.split(r'\\n\\s*\\n',plain) if p.strip()]
+        result=[]
+        current=''
+        for paragraph in paragraphs:
+            candidate=(current+'\\n\\n'+paragraph) if current else paragraph
+            if current and details(candidate)['segments']>_MAX_LOGICAL_SMS_SEGMENTS:
+                result.append(current)
+                current=paragraph
+            else:
+                current=candidate
+        if current:
+            result.append(current)
+        return result
+""")
+    return e.text
 
+
+def readme(source: str) -> str:
+    e=Edit('README.md',source)
+    if 'last_presented_property_options' in source and 'v13.3' in source:
+        raise PatchError('README.md already describes v13.3; refusing duplicate installation')
+    e.replace(' (v13.2)', ' (v13.3)',n=1)
+    e.insert_before('## Grafo comercial — no es un embudo rígido\n', '''### Selección de opciones (v13.3)
+
+Una búsqueda muestra **una** casa sin numeración; con varias, presenta una
+lista corta con `1. H-204`, `2. H-101`, precios, disponibilidad y saltos de
+línea legibles en el chat/SMS. El comprador puede responder «Option 2»,
+«the second one» o referirse al precio. El backend vincula el número con el
+**orden efectivamente enviado**, no con la posición del inmueble en catálogo.
+Esta selección lleva a **Details** y registra interés de nivel `considering`;
+no modifica presupuesto/dormitorios principales, no inicia una visita y no
+autoriza reservas. La fase regresa a exploración únicamente si el comprador
+solicita nuevos filtros u otras casas.
+
+`last_presented_property_options` guarda el mensaje origen, la revisión de
+búsqueda y los pares `(display_number, unit_id)` de opciones realmente mostradas.
+El estado se reemplaza solo al entregar otra lista; una búsqueda sin resultados
+lo invalida. Hermes/LLM explican y asesoran; el backend valida identidad,
+numeración y hechos autorizados, con reparación del texto únicamente si la
+respuesta omite códigos o confunde opciones. El render Markdown de Next.js
+respeta los saltos de línea y la proyección SMS conserva párrafos separados.
 
 ''')
-    e.replace("        # Do not turn a bad link into a plausible but unverifiable address.\n        raise ValueError('Hermes returned a URL not authorized by the domain media tool.')",
-              """        # An unauthorized location/media URL must never destroy a valid
-        # turn or produce a fictional address. Strip and answer from verified
-        # catalog facts instead; unknown domains are never whitelisted.
-        plain=_safe_url_recovery(state,plain,unauthorised)
-        state.setdefault('tool_observations',[]).append({
-            'tool':'outbound_url_recovery','status':'recovered',
-            'fields':['unapproved_url'],
-            'message_id':state.get('_active_source_message_id'),
-            'timestamp':__import__('datetime').datetime.now().isoformat()})""")
-    e.before("    # The language model cannot promote a selected hour to a confirmed visit.\n", """    # Repair a stray house mention in visit planning WITHOUT choosing it.
-    # A reply cannot transfer the buyer's draft merely by naming another house.
-    if state.get('_turn_intent')=='visit_planning':
-        from . import domain, conversation_context
-        draft=state.get('visit_draft') or {}
-        visit_house=draft.get('unit_id')
-        if visit_house in domain._units_by_code():
-            mentioned=conversation_context.mentioned_codes(plain,domain._units_by_code())
-            if mentioned and visit_house not in mentioned:
-                last=state.get('last_slot_search') or {}
-                preferred=draft.get('preferred_start_time')
-                if last.get('result_code')=='NO_SLOTS_AT_EXACT_TIME':
-                    requested=last.get('requested_start_time') or preferred
-                    plain=(f'For {visit_house}, there are no visits at '
-                           f'{requested or "that hour"} in the requested period. '
-                           'Would you like me to check 9:00 AM instead?')
-                elif draft.get('status')=='day_needed' and preferred:
-                    plain=(f'For {visit_house}, {preferred} is your preferred time. '
-                           'Which date would you like to check?')
-                else:
-                    plain=(f'We are arranging a visit to {visit_house}. '
-                           'Which day or time would you like to check?')
-                state.setdefault('tool_observations',[]).append({
-                    'tool':'visit_house_reply_recovery','status':'recovered',
-                    'fields':['visit_draft.unit_id'],
-                    'message_id':state.get('_active_source_message_id'),
-                    'timestamp':__import__('datetime').datetime.now().isoformat()})
-""")
-    e.replace("    return _suggest_available_assets(state,plain)",
-              "    return _offer_preferences_after_interest(state,_suggest_available_assets(state,plain))")
+    e.replace('`active_search`/`search_sessions` = búsquedas temporales y definitivas;',
+              '`active_search`/`search_sessions` = búsquedas temporales y definitivas; `last_presented_property_options` = última lista numerada y su mensaje origen;')
     return e.text
 
-
-def hermes(text):
-    e=Editor('backend/app/hermes_runtime.py',text)
-    e.replace("    'get_available_visit_slots': {\n        'description': 'Search anonymous visit availability for a previously requested house. Exact dates create expiring offers; broad periods return available days, never booked hours. Never repeat an identical failed query.',",
-              """    'get_available_visit_slots': {
-        'description': 'Search the FULL requested week/day range and optionally an exact clock start (HH:MM). Date-only searches return days, not booking consent. A no-slots result at 08:00 is a valid answer. Keep the existing visit house.',""")
-    e.replace("            'time_preference': {'type': 'string', 'enum': ['any','morning','afternoon','evening'],\n                                'description': 'Only when requested. Morning before 12:00, afternoon 12:00-17:00, evening after 17:00.'},",
-              """            'time_preference': {'type': 'string', 'enum': ['any','morning','afternoon','evening'],
-                                'description': 'Only when requested. Morning before 12:00, afternoon 12:00-17:00, evening after 17:00.'},
-            'requested_start_time': {'type':'string',
-                'description':'Optional exact time HH:MM, e.g. 08:00, across the full selected period.'},""")
-    e.replace("- Explore date first, then exact available times. Mention the house naturally.",
-              """- Explore date first, then exact available times. Mention the house naturally.
-- 'Other days this week' means CALENDAR dates, never more houses. Keep the
-  selected visit house independent of any last advertised search alternative.
-  Check ALL days in the requested week for an exact 08:00 start when asked;
-  do not limit the answer to a previously selected single day.
-- After listing several dates, '9am works' accepts a preferred hour only;
-  request the missing DATE, never silently reuse an old last_offered_date.
-- An interest in a home above the buyer's usual cap is a valid exception, NOT
-  authorization to raise the cap. Briefly offer to update only the relevant
-  preferences once; proceed with photos/details/visit even without an answer.
-  Only a clear buyer acceptance of an offered preference change may persist it.
-- Do not invent street addresses. Map links in this demo are city-level only.
-  When the buyer asks for a location, disclose that no verified visit pin exists.
-- Never use an old proposal_id for a different property and never call booking
-  tools for bare 'OK' or accepting a clock time. Validation errors are internal.""")
-    e.replace("        'active_search':state.get('active_search'),\n", """        'active_search':state.get('active_search'),
-        'preference_update_proposals':state.get('preference_update_proposals'),
-        'last_offered_dates':state.get('last_offered_dates'),
-        'property_interests':state.get('property_interests'),
-""")
-    return e.text
+def styles(source: str) -> str:
+    marker='/* v13.3 property option readability */'
+    if marker in source:
+        raise PatchError('frontend/src/app/globals.css already contains v13.3 styles')
+    return source.rstrip('\n') + '\n' + marker + '\n.message-content p,.message-content li{white-space:pre-line}\n'
 
 
-def main(text):
-    e=Editor('backend/main.py',text)
-    e.replace("    verified = domain.verify_explicit_preferences(state, message)\n", """    # Accept a previously OFFERED preference change only when the buyer
-    # explicitly chooses it. This is not inferred from selecting a house.
-    from app import commercial_continuity as continuity, sales_preferences
-    decided=continuity.preference_offer_decision(
-        state,message,domain._units_by_code())
-    if decided.get('action')=='update':
-        offer=decided['offer']; changes=offer['suggested_changes']
-        revision={}
-        if 'budget' in decided['fields']:
-            revision['budget']={
-                'mode':'cap',
-                'maximum_usd':changes['budget_maximum_usd']['suggested']}
-        if 'bedrooms' in decided['fields']:
-            revision['bedrooms']={
-                'mode':'preferred','preferred':changes['bedrooms']['suggested']}
-        changed=sales_preferences.apply(state,revision,
-            source_message_id=state.get('_active_source_message_id'))
-        if changed.get('error'):
-            raise ValueError(changed['error'])
-        # Rebuild UI/BlackPenguin profile from the same source evidence.
-        domain._sync_preference_projection(state,changed,message)
-        if 'filters' in decided['fields']:
-            from app import property_filters
-            filter_changes={k:v['suggested'] for k,v in
-                (offer.get('suggested_filter_changes') or {}).items()}
-            filtered=property_filters.update(state,filter_changes,
-                state.get('_active_source_message_id'))
-            if filtered.get('error'):
-                raise ValueError(filtered['error'])
-            state.setdefault('tool_observations',[]).append({
-                'tool':'accepted_property_filters','status':'applied',
-                'fields':filtered.get('changed_fields') or [],
-                'message_id':state.get('_active_source_message_id'),
-                'timestamp':domain.now_local().isoformat()})
-        state['_turn_intent']='preference_update'
-        state['_turn_scope']='permanent'
-        offer['status']='accepted'
-        offer['accepted_fields']=list(decided['fields'])
-        offer['decision_message_id']=state.get('_active_source_message_id')
-        state['conversation_phase']='exploration'
-    elif decided.get('action')=='exception_only':
-        state.setdefault('tool_observations',[]).append({
-            'tool':'preference_exception','status':'applied',
-            'fields':['unit_id'],
-            'message_id':state.get('_active_source_message_id'),
-            'timestamp':domain.now_local().isoformat()})
-    verified = domain.verify_explicit_preferences(state, message)
-""")
-    return e.text
-
-
-def frontend(text):
-    e=Editor('frontend/src/app/page.tsx',text)
-    e.replace('type ActiveSearch={revision:number;scope:\'temporary\'|\'permanent\';criteria:Record<string,unknown>;matching_unit_ids:string[];source_message_id:string|null;created_at:string};',
-              """type ActiveSearch={revision:number;scope:'temporary'|'permanent';criteria:Record<string,unknown>;matching_unit_ids:string[];source_message_id:string|null;created_at:string};
-type PreferenceProposal={unit_id:string;primary_revision:number;status:string;suggested_changes:Record<string,{current:number;suggested:number;excess_usd?:number}>;suggested_filter_changes?:Record<string,{current:number|string|boolean;suggested:number|string|boolean}>};""")
-    e.replace('type State={active_search?:ActiveSearch|null;',
-              'type State={preference_update_proposals?:Record<string,PreferenceProposal>;last_offered_dates?:string[];active_search?:ActiveSearch|null;')
-    e.replace("type ProfilePreview={lead:State['lead'];stage:string;active_search?:ActiveSearch|null;",
-              "type ProfilePreview={lead:State['lead'];stage:string;preference_update_proposals?:Record<string,PreferenceProposal>;last_offered_dates?:string[];active_search?:ActiveSearch|null;")
-    e.replace('  const activeSearch=liveProfile?.active_search||state?.active_search;',
-              """  const activeSearch=liveProfile?.active_search||state?.active_search;
-  const preferenceProposals=liveProfile?.preference_update_proposals||state?.preference_update_proposals||{};
-  const latestPreferenceProposal=Object.values(preferenceProposals).find(p=>
-    p.unit_id===(liveProfile?.conversation_focus?.unit_id||state?.conversation_focus?.unit_id)&&
-    (p.status==='pending'||p.status==='offered'||p.status==='exception_only'));
-  const showSearchAsCurrent=conversationPhase==='exploration'||conversationPhase==='search'||conversationPhase==='comparison';""")
-    e.replace('              {activeSearch&&<div className="active-search-panel">',
-              '              {activeSearch&&showSearchAsCurrent&&<div className="active-search-panel">')
-    e.replace("              {planningPaused&&visitDraft?.unit_id&&<div className=\"paused-visit-note\">",
-              """              {activeSearch&&!showSearchAsCurrent&&<details className="inspector">
-                <summary>Previous search · #{activeSearch.revision}</summary>
-                <small className="muted">{activeSearch.matching_unit_ids.length?
-                  'Earlier matches: '+activeSearch.matching_unit_ids.join(', '):
-                  'That earlier search had no exact matches. It is not the current activity.'}</small>
-              </details>}
-              {latestPreferenceProposal&&<div className="active-search-panel">
-                <div className="active-search-head"><Search size={13}/><strong>Preference advice · {latestPreferenceProposal.unit_id}</strong></div>
-                <small>{latestPreferenceProposal.status==='exception_only'?'One-off option; original preferences retained':
-                  latestPreferenceProposal.status==='offered'?'Update offered; buyer has not accepted':'Advice pending'}</small>
-                {latestPreferenceProposal.suggested_changes.budget_maximum_usd&&
-                  <small>Price {usd.format(latestPreferenceProposal.suggested_changes.budget_maximum_usd.suggested)}
-                    · {usd.format(latestPreferenceProposal.suggested_changes.budget_maximum_usd.excess_usd||0)} over saved maximum</small>}
-                {latestPreferenceProposal.suggested_changes.bedrooms&&
-                  <small>{latestPreferenceProposal.suggested_changes.bedrooms.suggested} bedrooms vs saved preference of {latestPreferenceProposal.suggested_changes.bedrooms.current}</small>}
-                {Object.keys(latestPreferenceProposal.suggested_filter_changes||{}).length>0&&
-                  <small>Other differences: {Object.keys(latestPreferenceProposal.suggested_filter_changes||{}).map(s=>s.replaceAll('_',' ')).join(', ')}</small>}
-              </div>}
-              {planningPaused&&visitDraft?.unit_id&&<div className="paused-visit-note">""")
-    e.replace("{o.status==='rejected'?<Info size={13} className=\"agent-work-error\"/>:liveProfile?<Info size={13} className=\"agent-work-pending\"/>:<Check size={13} className=\"agent-work-done\"/>}",
-              """{['rejected','cached_rejection'].includes(o.status)?<Info size={13} className="agent-work-error"/>:
-                  ['recovered','cached'].includes(o.status)||liveProfile?<Info size={13} className="agent-work-pending"/>:
-                  <Check size={13} className="agent-work-done"/>}""")
-    e.replace("{o.status==='rejected'&&o.reason&&<small title={o.next_action||undefined}>{o.reason}</small>}",
-              "{['rejected','cached_rejection','recovered'].includes(o.status)&&o.reason&&<small title={o.next_action||undefined}>{o.reason}</small>}")
-    return e.text
-
-TRANSFORM={
-'backend/app/commercial_turn.py':commercial,
-'backend/app/conversation_context.py':context,
-'backend/app/domain.py':domain,
-'backend/app/delivery_policy.py':policy,
-'backend/app/hermes_runtime.py':hermes,
-'backend/main.py':main,
-'frontend/src/app/page.tsx':frontend,
+TRANSFORMS={
+    'backend/app/commercial_turn.py':commercial,
+    'backend/app/conversation_context.py':context,
+    'backend/app/domain.py':domain,
+    'backend/app/delivery_policy.py':policy,
+    'backend/app/hermes_runtime.py':hermes,
+    'backend/app/sms.py':sms,
+    'frontend/src/app/globals.css':styles,
+    'README.md':readme,
 }
+COPY=[
+    'backend/app/property_options.py',
+    'backend/tests/test_v13_3_option_selection.py',
+]
 
 
-def transform(repo:pathlib.Path):
+def transform(repo: Path):
+    if not (repo/'backend/app/commercial_continuity.py').is_file():
+        raise PatchError('Requires a checkout with Hermes v13.2 already applied. Apply the previous v13.2 differential first.')
     old,new={},{}
-    for path,fn in TRANSFORM.items():
-        src=repo/path
-        if not src.is_file():raise PatchError(f'Missing {path}: use a full v13.1 checkout')
-        raw=src.read_text(encoding='utf-8')
-        old[path]=raw
-        new[path]=fn(raw)
-    for path in ('backend/app/commercial_continuity.py','backend/tests/test_v13_2_continuity.py','README.md'):
-        src=repo/path
-        old[path]=src.read_text(encoding='utf-8') if src.exists() else ''
-        new[path]=(ROOT/path).read_text(encoding='utf-8')
+    for rel,fn in TRANSFORMS.items():
+        src=repo/rel
+        if not src.is_file():
+            raise PatchError('Missing source: '+rel)
+        before=src.read_text(encoding='utf-8')
+        after=fn(before)
+        if rel.endswith('.py'):
+            try:ast.parse(after,filename=rel)
+            except SyntaxError as exc:raise PatchError(f'Invalid generated Python syntax in {rel}: {exc}') from exc
+        old[rel],new[rel]=before,after
+    for rel in COPY:
+        dest=repo/rel
+        if dest.exists():
+            raise PatchError(f'Already exists: {rel}. Refusing to overwrite existing work.')
+        before=''
+        after=(ROOT/rel).read_text(encoding='utf-8')
+        ast.parse(after,filename=rel)
+        old[rel],new[rel]=before,after
     return old,new
 
 
-def main_cmd():
-    ap=argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('--repo',required=True,type=pathlib.Path)
-    ap.add_argument('--dry-run',action='store_true')
-    ap.add_argument('--print-diff',action='store_true')
-    args=ap.parse_args()
-    repo=args.repo.resolve()
-    if not (repo/'backend/app/domain.py').is_file():
-        ap.error('--repo must be the root of a local testing-hermes-agent checkout')
-    try:old,new=transform(repo)
-    except PatchError as exc:sys.exit('PRECHECK FAILED (nothing changed): '+str(exc))
-    patch=''.join(''.join(difflib.unified_diff(
+def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--repo',type=Path,required=True)
+    parser.add_argument('--dry-run',action='store_true')
+    parser.add_argument('--print-diff',action='store_true')
+    args=parser.parse_args()
+    repo=args.repo.expanduser().resolve()
+    try:
+        old,new=transform(repo)
+    except (OSError,PatchError) as exc:
+        parser.exit(2,'PRECHECK FAILED — no files modified: '+str(exc)+'\n')
+    diff=''.join(''.join(difflib.unified_diff(
         old[path].splitlines(keepends=True),new[path].splitlines(keepends=True),
         fromfile=('a/'+path if old[path] else '/dev/null'),
         tofile='b/'+path)) for path in sorted(new))
-    if args.print_diff:print(patch)
-    files=[k for k in new if new[k]!=old[k]]
-    print('Preflight successful. Differential files:',len(files))
-    for k in files:print(' - '+k)
+    if args.print_diff:
+        print(diff)
+    print('Preflight OK —',len(new),'differential files:')
+    for path in new:print(' ',path)
     if args.dry_run:
-        print('Dry run: no files changed.');return
-    # All preflight checks passed before the first write.
-    for k in files:
-        dest=repo/k;dest.parent.mkdir(parents=True,exist_ok=True)
-        dest.write_text(new[k],encoding='utf-8')
-    out=repo/'v13_2_changes.patch'
-    out.write_text(patch,encoding='utf-8')
-    print('Local files updated. Patch saved:',out)
-    print('No GitHub or Vercel actions were executed.')
+        print('Dry run complete; no changes written.')
+        return
+    # Entire edit set and syntax prevalidated before any files are written.
+    for path,content in new.items():
+        dst=repo/path
+        dst.parent.mkdir(parents=True,exist_ok=True)
+        dst.write_text(content,encoding='utf-8')
+    artifact=repo/'v13_3_changes.patch'
+    artifact.write_text(diff,encoding='utf-8')
+    print('Wrote a local review patch:',artifact)
+    print('No remote operations have been performed.')
 
-if __name__=='__main__':main_cmd()
+if __name__=='__main__':
+    main()

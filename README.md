@@ -1,4 +1,4 @@
-# Hermes Agent Lab · Asesor inmobiliario conversacional (v13.2)
+# Hermes Agent Lab · Asesor inmobiliario conversacional (v13.3)
 
 **Demo técnica y comercial** de un agente que acompaña a un comprador desde la búsqueda de casas hasta la solicitud y confirmación de una visita. Utiliza [Hermes Agent de Nous Research](https://github.com/NousResearch/hermes-agent), un LLM vía OpenRouter y servicios propios de negocio. **No es un portal de venta real**: datos de propiedades, imágenes, asesores, agendas, precios y reservas son sintéticos.
 
@@ -11,6 +11,26 @@
 5. **Confirma:** recibe un resumen explícito **casa + día + hora**; un simple «OK» no confirma. La asignación del vendedor físico y la reserva se determinan únicamente tras una transacción válida. El agente no realiza el cierre de la venta presencial.
 
 Si una alternativa supera los criterios habituales (presupuesto, dormitorios, área, baños, estacionamientos, cocina o patio), Hermes **ofrece una vez** actualizar solo las preferencias afectadas o mantenerla como **excepción de interés**. La oferta no bloquea consultas ni agendamiento y no cambia ningún dato hasta una aceptación explícita; una declaración inequívoca de cambio se registra directamente con evidencia.
+
+### Selección de opciones (v13.3)
+
+Una búsqueda muestra **una** casa sin numeración; con varias, presenta una
+lista corta con `1. H-204`, `2. H-101`, precios, disponibilidad y saltos de
+línea legibles en el chat/SMS. El comprador puede responder «Option 2»,
+«the second one» o referirse al precio. El backend vincula el número con el
+**orden efectivamente enviado**, no con la posición del inmueble en catálogo.
+Esta selección lleva a **Details** y registra interés de nivel `considering`;
+no modifica presupuesto/dormitorios principales, no inicia una visita y no
+autoriza reservas. La fase regresa a exploración únicamente si el comprador
+solicita nuevos filtros u otras casas.
+
+`last_presented_property_options` guarda el mensaje origen, la revisión de
+búsqueda y los pares `(display_number, unit_id)` de opciones realmente mostradas.
+El estado se reemplaza solo al entregar otra lista; una búsqueda sin resultados
+lo invalida. Hermes/LLM explican y asesoran; el backend valida identidad,
+numeración y hechos autorizados, con reparación del texto únicamente si la
+respuesta omite códigos o confunde opciones. El render Markdown de Next.js
+respeta los saltos de línea y la proyección SMS conserva párrafos separados.
 
 ## Grafo comercial — no es un embudo rígido
 
@@ -60,7 +80,7 @@ flowchart TD
 
 **Flujo de un turno:** (1) FastAPI recupera el estado persistido y el mensaje → (2) resuelve referencias sin autorizar compromisos nuevos → (3) Hermes recibe instrucciones estables, historial y contexto aislado por lead → (4) el LLM decide llamadas a herramientas → (5) servicios verifican catálogo y operación → (6) se comprueban respuesta, enlaces y consentimiento; los fallos de enlace se reparan de forma segura, no se publican → (7) se guardan estado + mensajes y se notifica por streaming. Un turno fallido no se publica como reserva confirmada.
 
-**Memoria:** `search_preferences` + historial = requisitos principales; `active_search`/`search_sessions` = búsquedas temporales y definitivas; `conversation_focus` = tema del diálogo; `property_interests` y `preference_update_proposals` = interés y asesoría sin cambios automáticos; `visit_draft`, `booking_offers`, `confirmation_request` = planificación/consentimiento; `shared_media`/`answered_topics` = información ya entregada; `tool_observations` = ejecuciones y rechazos reales. Los detalles del buyer no se guardan en `MEMORY.md` global de Hermes.
+**Memoria:** `search_preferences` + historial = requisitos principales; `active_search`/`search_sessions` = búsquedas temporales y definitivas; `last_presented_property_options` = última lista numerada y su mensaje origen; `conversation_focus` = tema del diálogo; `property_interests` y `preference_update_proposals` = interés y asesoría sin cambios automáticos; `visit_draft`, `booking_offers`, `confirmation_request` = planificación/consentimiento; `shared_media`/`answered_topics` = información ya entregada; `tool_observations` = ejecuciones y rechazos reales. Los detalles del buyer no se guardan en `MEMORY.md` global de Hermes.
 
 ## Datos sintéticos de esta demo
 

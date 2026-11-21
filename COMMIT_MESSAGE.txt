@@ -1,10 +1,14 @@
-feat(hermes): preserve sales context across property searches and visits
+fix(hermes): preserve numbered property selections and readable listings
 
-- Keep the active visit property independent of past search results and assistant mentions
-- Check exact appointment times across full date ranges and preserve partial time choices
-- Prevent stale date or proposal selection without buyer evidence
-- Offer scoped preference updates and one-off property exceptions without silent profile changes
-- Recover unsupported property and map links without discarding valid conversation turns
-- Display active sales phases, historical searches, and rejected tool outcomes accurately
-- Document Hermes, the LLM, business tools, database persistence, and synthetic sales journey
-- Add anonymized conversation regressions for context, scheduling, media, and preference decisions
+- Resolve option numbers, ordinals and price references against the ordered
+  catalog-backed list actually shown to the buyer.
+- Move clear selections into property details without creating a new search,
+  changing primary preferences or initiating appointment scheduling.
+- Keep the option-to-unit map with search revision and outgoing message ID in
+  persisted lead state; invalidate it when a new search replaces the menu.
+- Present one property without numbering and multiple properties as numbered,
+  multiline, SMS-friendly options with name, code, price and availability.
+- Guard both search tools against stale-H-201 recovery on an H-101 selection;
+  repair incorrect model answers using approved property facts only.
+- Preserve paragraph breaks in multipart SMS projection and document the
+  reversible exploration-to-details behavior and regression coverage.

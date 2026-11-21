@@ -1,0 +1,3 @@
+Hermes v13.3 - Displayed Property Options & Readable SMS Menus
+Baseline: Hermes v13.2 differential applied over v13.1.
+Local application only; no GitHub, PR, Vercel or external API changes.
