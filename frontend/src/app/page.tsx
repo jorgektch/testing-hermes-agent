@@ -116,6 +116,7 @@ export default function Page(){
   const chatBody=useRef<HTMLDivElement>(null);
   const state=active?.state;
   const turnLimit=auth?.max_turns||MAX_TURNS;
+  const turnLimitReached=(state?.turn_count ?? 0)>=turnLimit;
   const viewLead=liveProfile?.lead||state?.lead;
   const profileFacts=liveProfile?.facts||state?.bp_episode?.leads?.lead_profile_data?.sales_profile?.current||{};
   const profileEvidence=liveProfile?.ui_fact_evidence||state?.ui_fact_evidence||{};
@@ -192,7 +193,7 @@ export default function Page(){
   async function newLead(){if(!auth||busy)return;setBusy(true);setError('');try{const r=await fetch('/api/leads',{method:'POST',headers:authorizedHeaders,body:JSON.stringify(form)});const data=await r.json();if(!r.ok)throw new Error(data.detail||'Failed to create lead');setActive(data);setForm({...EMPTY_FORM});setShowCreate(false);setLeftView('inventory');await refreshLeads();}catch(e){setError(e instanceof Error?e.message:'Unable to create lead')}finally{setBusy(false)}}
   async function send(){
     const message=draft.trim();
-    if(!auth||!active||!message||busy||state?.turn_count>=turnLimit)return;
+    if(!auth||!active||!message||busy||turnLimitReached)return;
     setBusy(true);setError('');setDraft('');setLiveProfile(null);
     const original=active;
     setActive({...active,messages:[...active.messages,{id:'pending',role:'user',content:message,
@@ -272,7 +273,7 @@ export default function Page(){
             })}
             {busy&&<div className="message assistant"><div className="message-role">AI Sales Agent · Hermes</div><div className="message-content">Thinking…</div></div>}
           </div>{showJump&&<button className="jump-bottom" onClick={()=>{chatBody.current?.scrollTo({top:chatBody.current.scrollHeight,behavior:'smooth'});setShowJump(false)}}><ArrowDown size={14}/> Latest</button>}
-          <div className="composer-area"><div className="composer-box"><textarea rows={2} value={draft} onChange={e=>setDraft(e.target.value)} disabled={busy||state?.turn_count>=turnLimit} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();void send()}}} placeholder={state?.turn_count>=turnLimit?'Demo limit reached':'Type as this fictional lead…'}/><button className="send-btn" disabled={!draft.trim()||busy||state?.turn_count>=turnLimit} aria-label="Send" onClick={()=>void send()}><ArrowUp size={18}/></button></div><div className="fineprint">Messages are simulated in SMS format. Visit confirmations and history are saved in Turso. No messages are sent to real phones.</div></div></>:<div className="empty-chat"><MessageCircle size={28}/><h3>Start with a demo lead</h3><p>Create fictional contact details or select a previous conversation.</p><button className="primary" onClick={()=>setShowCreate(true)}><Plus size={14}/> New lead</button></div>}
+          <div className="composer-area"><div className="composer-box"><textarea rows={2} value={draft} onChange={e=>setDraft(e.target.value)} disabled={busy||turnLimitReached} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();void send()}}} placeholder={turnLimitReached?'Demo limit reached':'Type as this fictional lead…'}/><button className="send-btn" disabled={!draft.trim()||busy||turnLimitReached} aria-label="Send" onClick={()=>void send()}><ArrowUp size={18}/></button></div><div className="fineprint">Messages are simulated in SMS format. Visit confirmations and history are saved in Turso. No messages are sent to real phones.</div></div></>:<div className="empty-chat"><MessageCircle size={28}/><h3>Start with a demo lead</h3><p>Create fictional contact details or select a previous conversation.</p><button className="primary" onClick={()=>setShowCreate(true)}><Plus size={14}/> New lead</button></div>}
         </section>
         <section className="panel lead-panel"><div className="panel-top"><div><h2>Lead state</h2><small>{liveProfile?'Updating · pending save':active?'Saved facts · '+timeZone:'Waiting for a lead'}</small></div></div>
           <div className="panel-scroll lead-scroll">{active&&state?<>{liveProfile&&<p className="profile-preview-note">Provisional facts · awaiting Hermes completion and Turso commit</p>}
