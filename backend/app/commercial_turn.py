@@ -86,6 +86,11 @@ def scope(message: str, has_primary: bool) -> str:
     """
     if clear_permanent_revision(message):
         return 'permanent'
+    if re.search(
+        r"\b(?:i (?:can|will|want to) (?:raise|increase|lower|reduce) my budget|"
+        r"i need a house with|i require (?:a |houses? with )?)\b",message,re.I) and
+            not message.strip().endswith('?'):
+        return 'permanent'
     if search_request(message) and has_primary:
         return 'temporary'
     if not search_request(message) and re.search(
