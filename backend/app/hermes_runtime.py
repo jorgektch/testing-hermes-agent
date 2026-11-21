@@ -77,6 +77,10 @@ SALES WORKFLOW:
   A buyer may revise all filters together or one at a time, return from visit
   planning to comparison, or explore another property without cancelling a
   pending visit. The visit draft is NEVER changed by a mere side question.
+- To compare two named or recently offered houses, call compare_properties.
+  Do not change the current property topic or active visit merely to compare.
+  The buyer may then choose to explore one house; if they do, update the
+  conversational focus, not the pending visit.
 - A partial qualification is enough to search; do not demand budget, purchase
   timeline or a formal property selection before answering available facts.
 - For larger-area, cheaper, fewer-bedrooms or more-expensive comparisons use
@@ -215,6 +219,14 @@ SCHEMAS: dict[str, dict] = {
                     'backyard_area_m2':{'type':'number'},
                 },'additionalProperties':False},
         }},
+    },
+    'compare_properties': {
+        'description':'Read-only comparison of 2–3 buyer-named or recently offered published houses, including verified prices, bedrooms, bathrooms and area differences. Does NOT select an appointment house.',
+        'parameters':{'type':'object','properties':{
+            'unit_ids':{'type':'array','items':{'type':'string'},
+                        'minItems':2,'maxItems':3,
+                        'description':'Optional if buyer says compare those two, when exactly two recent options exist.'},
+        },'additionalProperties':False},
     },
     'get_unit_details': {
         'description': 'Get verified price, size, amenities and availability for ONE house the buyer explicitly asks about. Does not return media links.',
@@ -387,6 +399,7 @@ def _run_locked(message: str, history: list[dict], state: dict, *,
         'get_project_overview': lambda a: domain.project_overview(),
         'evaluate_properties_for_lead': lambda a: domain.evaluate_properties(state, **a),
         'get_unit_details': lambda a: domain.unit_details(state, **a),
+        'compare_properties': lambda a: domain.compare_properties(state, **a),
         'list_unit_assets': lambda a: domain.list_unit_assets(state, **a),
         'get_unit_media': media_on_request,
         'update_search_preferences': lambda a: domain.update_search_preferences(state, **a),
@@ -424,7 +437,8 @@ def _run_locked(message: str, history: list[dict], state: dict, *,
                 state['_matching_options_this_turn'] = outcome.get('matching_properties', [])
             if _name == 'get_unit_details' and isinstance(outcome, dict) and outcome.get('ok'):
                 state['_details_for_current_turn'] = outcome
-            if _name in ('evaluate_properties_for_lead', 'get_unit_details', 'get_unit_media',
+            if _name in ('evaluate_properties_for_lead', 'compare_properties',
+                         'get_unit_details', 'get_unit_media',
                          'list_unit_assets', 'update_search_preferences',
                          'update_lead_profile', 'track_property_interest', 'get_available_visit_slots',
                          'select_visit_time', 'book_onsite_visit', 'reschedule_onsite_visit'):
