@@ -803,16 +803,23 @@ def _buyer_mentioned_house(state: dict, unit_id: str) -> bool:
     return False
 
 
-def unit_details(state: dict, unit_id: str) -> dict:
+def unit_details(state: dict, unit_id: str | None = None) -> dict:
     """Expose verified details for ONE requested house, never all catalog units.
 
     The current buyer turn must name that house, or it must already be the
     conversational focus. Matching a search result alone is not buyer interest.
     """
+    resolution=state.get('_turn_property_resolution') or {}
+    if unit_id is None:
+        unit_id=resolution.get('unit_id') or (
+            _focus(state).get('unit_id') if not state.get('_active_source_message_id') else None)
     unit = next((u for u in read_catalog()['properties']
                  if u['unit_id'].casefold() == str(unit_id).strip().casefold()), None)
     if unit is None:
-        return {'error': 'Unknown or unpublished house.'}
+        return {'error':'No single published house can be identified.',
+                'error_code':'REFERENCE_UNRESOLVED',
+                'candidates':resolution.get('candidates',[]),
+                'next_action':'Ask for a property only when the current options are ambiguous.'}
     resolution=state.get('_turn_property_resolution') or {}
     # Public factual reads require an unambiguous conversational reference,
     # never a buying-interest declaration or an appointment commitment.
@@ -871,11 +878,15 @@ def unit_media(unit_id: str) -> dict:
 
 
 
-def list_unit_assets(state: dict, unit_id: str) -> dict:
+def list_unit_assets(state: dict, unit_id: str | None = None) -> dict:
     """Read approved media availability without authorizing any URLs to send."""
+    if not unit_id:
+        unit_id=(state.get('_turn_property_resolution') or {}).get('unit_id')
     unit = _units_by_code().get(unit_id)
     if not unit:
-        return {'error':'Unknown or unpublished house.'}
+        return {'error':'The referenced house is not available.',
+                'error_code':'REFERENCE_UNRESOLVED',
+                'next_action':'Ask which property only if no unique contextual reference exists.'}
     reference=state.get('_turn_property_resolution') or {}
     if state.get('_active_source_message_id') and (
             reference.get('ambiguous') or reference.get('unit_id')!=unit_id):
