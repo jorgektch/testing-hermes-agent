@@ -28,6 +28,14 @@ A **single-screen evaluation workspace** for [Nous Research Hermes Agent](https:
 - **Source of truth:** edit `shared/blackpenguin/{project,property_types,units,assets}.json`, run `python scripts/build_catalog_from_blackpenguin.py`, then `python scripts/generate_demo_assets.py` (requires `reportlab` installed). Do **not** manually edit generated `shared/catalog.json` or `backend/app/catalog.json`.
 - **Media:** `/properties/H-201/gallery` and equivalent URLs aggregate only the given unit's images. A PDF in a unit card is a synthetic *fact sheet*, not a licensed construction plan or project-level brochure. Retired apartment asset files are retained on disk only to avoid breaking previously shared historical links, but are not in the public catalog.
 
+## v10 — focus continuity and graceful scheduling
+
+- `conversation_focus` tracks the unambiguously discussed house; `visit_draft` independently tracks the house, date and time of the requested visit. Browsing another listing does not redirect a pending appointment.
+- Appointment searches accept exact dates, relative week/weekend periods, and a morning/afternoon/evening preference. They distinguish `NO_SLOTS`, `AMBIGUOUS_PROPERTY`, `DATE_OUTSIDE_HORIZON`, `INVALID_DATE`, and `CALENDAR_UNAVAILABLE`; repeated within-turn queries return the cached outcome.
+- Unit locations contain synthetic city-level Google Maps references, **not** real house pins, showroom directions or verifiable physical addresses.
+- Hermes still selects tools via upstream `AIAgent`. Explicit lead consent, chosen hours, atomic advisor assignment and booking revalidation remain enforced in the backend.
+- Regression checks are in `backend/tests/test_focus_and_slots_v10.py`. No real customers or physical appointments are involved.
+
 ## Architecture
 
 ```mermaid
