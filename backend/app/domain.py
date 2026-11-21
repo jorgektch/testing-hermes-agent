@@ -802,6 +802,55 @@ def evaluate_properties(state: dict, max_budget_usd: int | None = None,
     }
 
 
+
+def compare_properties(state: dict, unit_ids: list[str] | None = None) -> dict:
+    """Read-only grounded comparison; never selects a house or books a visit."""
+    known=_units_by_code()
+    spoken=str(state.get('_active_source_message_text') or '')
+    named=conversation_context.mentioned_codes(spoken,known)
+    requested=unit_ids or (named if len(named)>=2 else [])
+    if not requested and re.search(
+            r'\b(?:compare|difference|between|both|those two|these two)\b',
+            spoken,re.I):
+        requested=state.get('last_presented_units') or []
+    requested=list(dict.fromkeys(requested))
+    if not 2<=len(requested)<=3 or any(c not in known for c in requested):
+        return {'error':'Specify two or three published houses to compare.',
+                'error_code':'COMPARISON_NEEDS_HOUSES',
+                'next_action':'Use two named houses or the last two offered options.'}
+    if state.get('_active_source_message_id') and not (
+            all(code in named for code in requested) or
+            (set(requested).issubset(set(state.get('last_presented_units') or [])) and
+             re.search(r'\b(?:compare|difference|between|both|those two|these two)\b',
+                       spoken,re.I))):
+        return {'error':'Comparison inputs must be grounded in this conversation.',
+                'error_code':'COMPARISON_NOT_GROUNDED',
+                'next_action':'Use houses named or recently offered to the buyer.'}
+    entries=[]
+    for code in requested:
+        u=known[code]
+        entries.append({
+            'unit_id':code,'name':u['commercial_name'],
+            'price_usd':u['price_usd'],'bedrooms':u['bedrooms'],
+            'bathrooms':u['bathrooms'],'built_area_sqm':u['area_sqm'],
+            'lot_area_sqm':u['lot_area_m2'],
+            'confirmed_features':u.get('confirmed_features') or {},
+            'availability':u['available_from_date'],
+        })
+    first=entries[0]
+    differences={x['unit_id']:{
+        'price_usd_vs_first':x['price_usd']-first['price_usd'],
+        'built_area_sqm_vs_first':x['built_area_sqm']-first['built_area_sqm'],
+        'bedrooms_vs_first':x['bedrooms']-first['bedrooms']
+    } for x in entries[1:]}
+    state['conversation_phase']='comparison'
+    record(state,'comparison','Compared '+', '.join(requested))
+    return {'ok':True,'properties':entries,'relative_to':first['unit_id'],
+            'differences':differences,'selected_unit_id':None,
+            'note':'Public comparison only. No unit selected for a visit.'}
+
+
+
 def _buyer_mentioned_house(state: dict, unit_id: str) -> bool:
     """Require direct buyer reference, optionally by ordinal from the offered list."""
     spoken = str(state.get('_active_source_message_text') or '').lower()
