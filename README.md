@@ -28,6 +28,41 @@ A **single-screen evaluation workspace** for [Nous Research Hermes Agent](https:
 - **Source of truth:** edit `shared/blackpenguin/{project,property_types,units,assets}.json`, run `python scripts/build_catalog_from_blackpenguin.py`, then `python scripts/generate_demo_assets.py` (requires `reportlab` installed). Do **not** manually edit generated `shared/catalog.json` or `backend/app/catalog.json`.
 - **Media:** `/properties/H-201/gallery` and equivalent URLs aggregate only the given unit's images. A PDF in a unit card is a synthetic *fact sheet*, not a licensed construction plan or project-level brochure. Retired apartment asset files are retained on disk only to avoid breaking previously shared historical links, but are not in the public catalog.
 
+## v13.1 — Budget capture and zero-match reliability
+
+This release fixes the Nov 21 demo conversation: a buyer requested a 2-bedroom
+house, then explicitly stated "I do not want to spend more than $200k".
+Previously, three `update_search_preferences` calls and three
+`search_properties` calls were rejected, while the budget stayed `unknown`.
+The exported customer JSON is **not** committed; only anonymized utterances
+are used in tests.
+
+- **One commercial write path:** direct buyer budget caps (including "do not
+  want to spend more than") are recorded as permanent limits with source
+  evidence. Initial bedroom statements generate one revision instead of
+  a minimum followed by an immediately superseding preference.
+- **Conversation memory as evidence:** `search_properties` accepts identical
+  bedroom counts and budget amounts from the saved profile even if absent
+  from the newest buyer message. Different, unsupported counts remain rejected.
+- **After-update catalog search:** a verified preference change recalculates
+  results before Hermes replies. Repeated identical successful search tool calls
+  reuse a per-turn response instead of appending duplicate sessions.
+- **No matches is a success:** out-of-budget houses are never presented as
+  matches. A verified closest option can be offered as an explicitly labeled
+  alternative with its exact excess. With a $200k maximum, H-201 costs $245k,
+  **$45k over** the limit; the limit remains unchanged.
+- **Agent-safe delivery:** responses that leak internal validation/retrieval
+  problems, imply nonexistent exact matches, or conceal the price deviation
+  are repaired from catalog facts. The real agent still owns the conversation
+  when it gives a correct, natural answer.
+- **Observability:** repeated failed tool calls are marked as cached
+  rejections rather than new successful operations. The active search and
+  answer remain separate from visit drafts and permanent preferences.
+- **Regression coverage:** anonymized unit tests plus full HTTP, mocked Hermes
+  and SQLite persistence reproduce the two user turns. CI remains necessary
+  but not sufficient: manually test the real model/OpenRouter and Turso in a
+  preview environment with synthetic leads before merging.
+
 ## v13 — Agent-Native Commercial Orchestration
 
 Hermes remains the conversational agent, while our tools own verifiable business
