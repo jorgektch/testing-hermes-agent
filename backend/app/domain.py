@@ -258,7 +258,8 @@ def _set_visit_unit(state: dict, code: str) -> None:
         return
     draft = _draft(state)
     if draft.get('unit_id') != code:
-        draft.update(unit_id=code, date=None, start_time=None, status='day_needed')
+        draft.update(unit_id=code, date=None, start_time=None,proposal_id=None,status='day_needed')
+        state['confirmation_request']=None
         proposal = state.get('booking_proposal')
         if proposal and proposal.get('selected_unit_id') != code and proposal.get('status') == 'offered':
             state['booking_proposal'] = None
@@ -297,6 +298,13 @@ def _observe_inbound_context(state: dict, message: str) -> None:
         message, flags=re.I))
     if existing_visit_reference and not mentioned and _draft(state).get('unit_id'):
         return
+    active=next((b for b in state.get('booked_visits',[]) if b.get('status')=='confirmed'),None)
+    if active and re.search(
+        r'\b(?:reschedule|change|move|postpone|switch)\b.*'
+        r'\b(?:visit|appointment|date|day|time)\b',message,re.I):
+        draft=_draft(state)
+        draft['action']='reschedule'
+        draft['original_meeting_id']=active['meeting_id']
     if visit_intent and not negated:
         target = mentioned[0] if len(mentioned) == 1 else (
             focus.get('unit_id') if not mentioned and not focus.get('ambiguous') else None)
@@ -1017,6 +1025,8 @@ def select_visit_time(state: dict, proposal_id: str, date_str: str, start_time: 
             return {'error': 'The offer expired. Search for new availability.'}
     except (ValueError, TypeError):
         return {'error': 'Invalid visit date or time.'}
+    if proposal.get('selected_unit_id')!=_draft(state).get('unit_id'):
+        return {'error':'This offer belongs to a different property from the current visit draft.'}
     if not any(slot['date'] == parsed_day and slot['start_time'] == parsed_time
                for slot in proposal['options']):
         return {'error': 'This hour was not offered.'}
