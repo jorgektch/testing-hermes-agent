@@ -9,16 +9,14 @@ from app import persistence as db, domain
 def env(monkeypatch,tmp_path):
     monkeypatch.setenv('DEMO_DATABASE_PATH',str(tmp_path/'demo.sqlite3'))
     monkeypatch.setenv('DEMO_SIGNING_SECRET','temporary-test-signing-secret-with-over-32-characters')
-    monkeypatch.setenv('DEMO_ACCESS_CODE','private-test-evaluator-code')
     monkeypatch.setenv('DEMO_ADMIN_PASSWORD','temporary-very-strong-admin-password')
     monkeypatch.delenv('TURSO_DATABASE_URL',raising=False)
     monkeypatch.delenv('VERCEL',raising=False)
     db.initialize()
 
 
-def login(client,role='evaluator'):
-    password='temporary-very-strong-admin-password' if role=='administrator' else 'private-test-evaluator-code'
-    r=client.post('/api/auth/login',json={'role':role,'credential':password})
+def login(client):
+    r=client.post('/api/auth/login',json={'credential':'temporary-very-strong-admin-password'})
     assert r.status_code==200,r.text
     return r.json()['csrf_token']
 
@@ -36,7 +34,7 @@ def test_public_catalog_and_health():
     assert len(c.get('/api/catalog').json()['properties'])==4
 
 
-def test_login_csrf_ownership_and_logout(env,monkeypatch):
+def test_admin_only_login_shared_visibility_csrf_and_logout(env,monkeypatch):
     a=TestClient(main.app)
     b=TestClient(main.app)
     assert a.get('/api/leads').status_code==401
@@ -45,8 +43,8 @@ def test_login_csrf_ownership_and_logout(env,monkeypatch):
     other=login(b)
     assert a.post('/api/leads',json={'first_name':'X','last_name':'Y','email':'x@example.test','phone':'+51999999999'}).status_code==403
     lead=add_lead(a,key)
-    assert b.get(f"/api/leads/{lead['id']}").status_code==404
-    assert len(b.get('/api/leads').json()['leads'])==0
+    assert b.get(f"/api/leads/{lead['id']}").status_code==200
+    assert len(b.get('/api/leads').json()['leads'])==1
     assert a.get(f"/api/leads/{lead['id']}").status_code==200
     assert a.post('/api/auth/logout',headers={'X-Demo-Csrf':key}).status_code==200
     assert a.get('/api/leads').status_code==401
@@ -76,26 +74,24 @@ def test_hermes_history_server_owned_and_multiturn(env,monkeypatch):
 
 
 def test_calendar_and_admin_permanent_delete(env):
-    guest=TestClient(main.app)
+    anonymous=TestClient(main.app)
     admin=TestClient(main.app)
-    gcsrf=login(guest)
-    acsrf=login(admin,'administrator')
-    lead=add_lead(guest,gcsrf)
+    acsrf=login(admin)
+    lead=add_lead(admin,acsrf)
     start=domain.now_local().date().isoformat()
-    calendar=guest.get('/api/calendar',params={'start':start,'days':7})
+    calendar=admin.get('/api/calendar',params={'start':start,'days':7})
     assert calendar.status_code==200,calendar.text
     assert len(calendar.json()['advisors'])==3
     assert calendar.json()['slots']
-    assert admin.get(f"/api/leads/{lead['id']}").status_code==200
-    assert guest.delete(f"/api/admin/leads/{lead['id']}",headers={'X-Demo-Csrf':gcsrf}).status_code==403
+    assert anonymous.get(f"/api/leads/{lead['id']}").status_code==401
+    assert anonymous.delete(f"/api/admin/leads/{lead['id']}").status_code==401
     assert admin.delete(f"/api/admin/leads/{lead['id']}",headers={'X-Demo-Csrf':acsrf}).status_code==200
-    assert guest.get(f"/api/leads/{lead['id']}").status_code==404
     assert admin.get(f"/api/leads/{lead['id']}").status_code==404
 
 
 def test_occupancy_conflicts_across_leads_and_deletion_releases(env):
     c=TestClient(main.app)
-    csrf=login(c,'administrator')
+    csrf=login(c)
     first=add_lead(c,csrf,'Alice')
     second=add_lead(c,csrf,'Bob')
     auth=db.session_lookup(c.cookies.get(main.COOKIE))
@@ -168,10 +164,10 @@ def test_fact_evidence_references_persisted_inbound_message(env,monkeypatch):
     assert interests[0][2] in messages
 
 
-def test_booking_calendar_cross_owner_privacy(env):
+def test_booking_calendar_shared_between_admin_sessions(env):
     admin=TestClient(main.app)
     visitor=TestClient(main.app)
-    acsrf=login(admin,'administrator')
+    acsrf=login(admin)
     login(visitor)
     lead=add_lead(admin,acsrf,'Private')
     auth=db.session_lookup(admin.cookies.get(main.COOKIE))
@@ -193,7 +189,8 @@ def test_booking_calendar_cross_owner_privacy(env):
     ours=next(x for x in admin_bookings if x['id']==booked['meeting']['id'])
     other=next(x for x in visitor_bookings if x['id']==booked['meeting']['id'])
     assert ours['unit_id']=='H-101' and ours['first_name']=='Private'
-    assert other['lead_id'] is None and other['unit_id'] is None and other['first_name'] is None
+    # There is now one admin role: independent admin logins share lead history.
+    assert other['unit_id']=='H-101' and other['first_name']=='Private'
     before=len(visitor.get('/api/calendar',params=params).json()['slots'])
     assert admin.delete(f"/api/admin/leads/{lead['id']}",headers={'X-Demo-Csrf':acsrf}).status_code==200
     after_calendar=visitor.get('/api/calendar',params=params).json()
@@ -205,21 +202,20 @@ def test_insecure_demo_credentials_require_explicit_opt_in(env, monkeypatch):
     """The three 'demo' credentials work only with the explicit unsafe switch."""
     monkeypatch.setenv('DEMO_SIGNING_SECRET', 'demo')
     monkeypatch.setenv('DEMO_ADMIN_PASSWORD', 'demo')
-    monkeypatch.setenv('DEMO_ACCESS_CODE', 'demo')
     monkeypatch.delenv('DEMO_ALLOW_WEAK_CREDENTIALS', raising=False)
     client = TestClient(main.app)
-    for role in ('administrator', 'evaluator'):
-        response = client.post('/api/auth/login', json={'role': role, 'credential': 'demo'})
-        assert response.status_code == 503
+    assert client.post('/api/auth/login', json={'credential': 'demo'}).status_code == 503
     monkeypatch.setenv('DEMO_ALLOW_WEAK_CREDENTIALS', 'true')
-    for role in ('evaluator', 'administrator'):
-        current = TestClient(main.app)
-        response = current.post('/api/auth/login', json={'role': role, 'credential': 'demo'})
-        assert response.status_code == 200, response.text
-        assert current.get('/api/me').status_code == 200
-        csrf = response.json()['csrf_token']
-        assert current.post('/api/auth/logout', headers={'X-Demo-Csrf': csrf}).status_code == 200
-    wrong = client.post('/api/auth/login', json={'role': 'administrator', 'credential': 'wrong'})
+    assert client.post('/api/auth/login', json={'role': 'evaluator', 'credential': 'demo'}).status_code == 403
+    assert client.post('/api/auth/login', json={'role': 'unknown', 'credential': 'demo'}).status_code == 403
+    current = TestClient(main.app)
+    response = current.post('/api/auth/login', json={'credential': 'demo'})
+    assert response.status_code == 200, response.text
+    assert response.json()['role'] == 'administrator'
+    assert current.get('/api/me').status_code == 200
+    csrf = response.json()['csrf_token']
+    assert current.post('/api/auth/logout', headers={'X-Demo-Csrf': csrf}).status_code == 200
+    wrong = client.post('/api/auth/login', json={'credential': 'wrong'})
     assert wrong.status_code == 401
 
 
@@ -229,3 +225,24 @@ def test_strong_credentials_still_work_with_weak_switch_disabled(env, monkeypatc
     assert main.accepted_demo_credential('strong-admin-pass', 16)
     assert not main.accepted_demo_credential('demo', 16)
     assert not main.accepted_demo_credential('demo', 32)
+
+
+def test_legacy_evaluator_session_cannot_be_reused(env):
+    """Upgrade must not let old evaluator cookies access the administrator-only API."""
+    import hashlib
+    import uuid
+    from datetime import datetime, timedelta, timezone
+
+    token = 'previous-evaluator-session-token'
+    now = datetime.now(timezone.utc)
+    with db.database() as con:
+        con.execute('INSERT INTO app_sessions(id,owner_id,role,token_hash,created_at,expires_at) VALUES(?,?,?,?,?,?)',
+                    (str(uuid.uuid4()), str(uuid.uuid4()), 'evaluator',
+                     hashlib.sha256(token.encode()).hexdigest(),
+                     db.iso(now), db.iso(now+timedelta(days=1))))
+    client = TestClient(main.app)
+    client.cookies.set(main.COOKIE, token)
+    assert client.get('/api/me').status_code == 401
+    assert client.get('/api/leads').status_code == 401
+    with pytest.raises(ValueError, match='Only administrator'):
+        db.session_create('evaluator')

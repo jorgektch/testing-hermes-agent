@@ -21,7 +21,7 @@ Turso/libSQL remote transaction and driver semantics require deployment smoke te
 
 ## Security boundaries
 
-Login modes: `DEMO_ACCESS_CODE` for evaluator guest credentials (independent owner per login), `DEMO_ADMIN_PASSWORD` for admin (server-side, minimum length 16). Authentication is tied to a random bearer cookie, hashed in DB and `HttpOnly`, `SameSite=Lax`, `Secure` on Vercel. Each mutating route requires an `X-Demo-Csrf` token derived from `DEMO_SIGNING_SECRET`; no cross-origin CORS access. `Cache-Control: no-store` on API responses. DB queries scope to owner; admin can inspect/delete all. Other evaluators see occupied calendar intervals but *not* other leads' names/units.
+Login mode: `DEMO_ADMIN_PASSWORD` for the sole administrator role (server-side, minimum length 16 unless explicitly in insecure demo mode). `DEMO_ACCESS_CODE` is deprecated and ignored. Authentication is tied to a random bearer cookie, hashed in DB and `HttpOnly`, `SameSite=Lax`, `Secure` on Vercel. Each mutating route requires an `X-Demo-Csrf` token derived from `DEMO_SIGNING_SECRET`; no cross-origin CORS access. `Cache-Control: no-store` on API responses. DB queries scope to owner; admin can inspect/delete all. The single administrator role can inspect all leads and their appointments; previous evaluator sessions are rejected.
 
 **Deletion:** administrator only, remove meetings/occupancy, appointment offers, messages (including original fact evidence), interests, facts, conversation snapshot, Hermes tool history and identity in a DB transaction. DB-backed access returns 404 immediately after deletion; browser polling removes stale viewers. External/backup copies cannot be guaranteed eliminated by the app.
 

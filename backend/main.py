@@ -46,7 +46,9 @@ def accepted_demo_credential(value: str, minimum_length: int) -> bool:
 
 
 class LoginInput(BaseModel):
-    role: str
+    # Only administrator login remains; old clients may send this field, but
+    # cannot request or obtain an evaluator session.
+    role: str = 'administrator'
     credential: str = Field(min_length=1, max_length=200)
 
 
@@ -72,8 +74,10 @@ def init_db():
 def auth_session(request: Request):
     init_db()
     session = db.session_lookup(request.cookies.get(COOKIE))
-    if not session:
-        raise HTTPException(401, 'Please sign in to the demo.')
+    if not session or session['role'] != 'administrator':
+        # Existing evaluator sessions are not permitted to continue after
+        # switching the application to administrator-only access.
+        raise HTTPException(401, 'Please sign in as administrator.')
     return session
 
 
@@ -120,15 +124,11 @@ def catalog():
 
 @app.post('/api/auth/login')
 def login(body: LoginInput, request: Request, response: Response):
-    if body.role == 'administrator':
-        expected=os.environ.get('DEMO_ADMIN_PASSWORD','')
-        if not accepted_demo_credential(expected, 16):
-            raise HTTPException(503,'A strong DEMO_ADMIN_PASSWORD (16+ characters) is required.')
-    elif body.role == 'evaluator':
-        expected=os.environ.get('DEMO_ACCESS_CODE','')
-        if not expected:raise HTTPException(503,'DEMO_ACCESS_CODE is required for evaluator access.')
-    else:
-        raise HTTPException(400,'Unknown demo role.')
+    if body.role != 'administrator':
+        raise HTTPException(403, 'Only administrator access is supported.')
+    expected=os.environ.get('DEMO_ADMIN_PASSWORD','')
+    if not accepted_demo_credential(expected, 16):
+        raise HTTPException(503, 'A strong DEMO_ADMIN_PASSWORD (16+ characters) is required.')
     # Constant-time comparison. Rate-limit the public route at the edge for internet deployment.
     if not hmac.compare_digest(body.credential,expected):
         raise HTTPException(401,'Invalid demo credentials.')

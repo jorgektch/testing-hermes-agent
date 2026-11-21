@@ -90,20 +90,39 @@ def build(allow_missing_assets: bool = False) -> dict:
     types = {p['id']:p for p in bp['property_types'] if p.get('review_status')=='confirmed' and p.get('project_id')==project['id']}
     sources = {s['id']:s for s in bp['sources']}
     assets = [a for a in bp['approved_sales_assets'] if a.get('project_id')==project['id'] and a.get('company_id')==bp['company_id'] and _approved_asset(a,sources)]
+    # Public unit media is derived only from approved assets with explicit
+    # coverage of that EXACT unit. A project/type-only brochure is never
+    # inherited as a property-specific document.
     media_types = {'gallery_image':'svg','floor_plan':'pdf','brochure':'pdf'}
     by_unit:dict[str,dict] = {}
     for asset in assets:
-        if asset['asset_type'] not in media_types:
+        asset_type=asset['asset_type']
+        if asset_type not in media_types:
             continue
         src=sources[asset['source_id']]
+        url=src['url']
+        if not url.endswith('.'+media_types[asset_type]):
+            continue  # Never mislabel an SVG as a PDF, or vice versa.
         for coverage in asset.get('coverage',[]):
             target=coverage.get('unit_id')
-            if target:
-                by_unit.setdefault(target,{'gallery_urls':[],'floorplan_brochure_pdf':None})
-                if asset['asset_type']=='gallery_image':
-                    by_unit[target]['gallery_urls'].append(src['url'])
-                elif asset['asset_type']=='floor_plan':
-                    by_unit[target]['floorplan_brochure_pdf']=src['url']
+            if not target:
+                continue
+            media=by_unit.setdefault(target,{'gallery_urls':[],'floorplan_brochure_pdf':None,'documents':[]})
+            if asset_type=='gallery_image':
+                if url not in media['gallery_urls']:
+                    media['gallery_urls'].append(url)
+            else:
+                if not any(document['url']==url for document in media['documents']):
+                    media['documents'].append({
+                        'type':asset_type,
+                        'title':asset.get('display_name') or ('Floor plan' if asset_type=='floor_plan' else 'Unit brochure'),
+                        'url':url,
+                        'scope':'unit',
+                        'unit_id':target,
+                    })
+                # Legacy alias retained for clients still reading a single PDF.
+                if media['floorplan_brochure_pdf'] is None:
+                    media['floorplan_brochure_pdf']=url
     brochure=next((sources[a['source_id']]['url'] for a in assets if a['asset_type']=='brochure' and any(not v.get('unit_id') and not v.get('property_type_id') for v in a.get('coverage',[]))),None)
     project_features=_confirmed_feature_items(bp['project_features'])
     # Project amenities come only from approved/onboarded project profile, not unit features.
@@ -157,7 +176,12 @@ def build(allow_missing_assets: bool = False) -> dict:
             'available_from_date':u.get('available_from') or 'Immediate',
             'status':'Available',  # marketing badge is derived after unit-level inventory checks
             'highlights':_highlights(typed),
-            'media':by_unit.get(u['id'],{'gallery_urls':[],'floorplan_brochure_pdf':None}),
+            'media':{
+                **by_unit.get(u['id'],{'gallery_urls':[],'floorplan_brochure_pdf':None,'documents':[]}),
+                # Relative path is portable across Vercel environments; the
+                # agent converts it to a configured absolute public URL.
+                'gallery_url':f"/properties/{u['unit_code']}/gallery" if by_unit.get(u['id'],{}).get('gallery_urls') else None,
+            },
             'demo_inventory_last_updated_at':u.get('inventory_updated_at'),
             'inventory_is_live':False,
         })

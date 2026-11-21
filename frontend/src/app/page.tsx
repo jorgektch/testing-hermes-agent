@@ -6,7 +6,7 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import SalesCalendar from './calendar';
 
-type Unit={unit_id:string;blackpenguin_unit_id:string;property_type_id:string;property_type:'Apartment'|'House';commercial_name:string;property_type_code?:string;property_type_description?:string;bedrooms:number;bathrooms:number;area_sqm:number;lot_area_m2?:number|null;floor_number?:number|null;price_usd:number;currency?:string;available_from_date:string;status:string;confirmed_features?:Record<string,string|number|boolean>;highlights:string[];media:{gallery_urls:string[];floorplan_brochure_pdf:string|null};demo_inventory_last_updated_at?:string;publication_status?:string;inventory_is_live?:boolean;phase_id?:string;phase_name?:string;property_model?:{model_name:string;code:string;bedrooms?:number;bathrooms?:number;built_area_min_m2?:number;built_area_max_m2?:number;lot_area_min_m2?:number;lot_area_max_m2?:number;total_units?:number;review_status?:string;inventory_updated_at?:string;verified_type_features?:{feature_key:string;verification_status:string;value_text?:string;value_number?:string;value_bool?:boolean}[]};};
+type Unit={unit_id:string;blackpenguin_unit_id:string;property_type_id:string;property_type:'Apartment'|'House';commercial_name:string;property_type_code?:string;property_type_description?:string;bedrooms:number;bathrooms:number;area_sqm:number;lot_area_m2?:number|null;floor_number?:number|null;price_usd:number;currency?:string;available_from_date:string;status:string;confirmed_features?:Record<string,string|number|boolean>;highlights:string[];media:{gallery_urls:string[];gallery_url:string|null;floorplan_brochure_pdf:string|null;documents:{type:string;title:string;url:string;scope:'unit';unit_id:string}[]};demo_inventory_last_updated_at?:string;publication_status?:string;inventory_is_live?:boolean;phase_id?:string;phase_name?:string;property_model?:{model_name:string;code:string;bedrooms?:number;bathrooms?:number;built_area_min_m2?:number;built_area_max_m2?:number;lot_area_min_m2?:number;lot_area_max_m2?:number;total_units?:number;review_status?:string;inventory_updated_at?:string;verified_type_features?:{feature_key:string;verification_status:string;value_text?:string;value_number?:string;value_bool?:boolean}[]};};
 type Catalog={project_info:{name:string;developer:string;project_type?:string;development_status?:string;short_description?:string;long_description?:string;project_code?:string;value_proposition:string;amenities:string[];phase_names?:string[];published_revision?:number;inventory_summary?:{total_units:number;available_units:number;reserved_units:number};general_brochure_pdf:string;location:{street_address:string;city:string;country:string;timezone?:string}};properties:Unit[]};
 type Fact={id:string;field:string;value:unknown;status:string;source:string;evidence?:string;captured_at?:string;source_ref?:{message_id?:string}};
 type Booking={meeting_id:string;advisor_name:string;unit_id:string|null;date:string;start_time:string;end_time:string;status:string};
@@ -14,13 +14,22 @@ type State={lead:{first_name:string|null;last_name:string|null;phone:string|null
 type Message={id:string;role:'user'|'assistant';content:string;created_at:string};
 type Lead={id:string;conversation_id:string;first_name:string;last_name:string;email:string;phone:string;updated_at:string;created_at:string;revision:number;state:State;messages:Message[]};
 type Summary={id:string;conversation_id:string;first_name:string;last_name:string;updated_at:string;last_message:string|null};
-type Session={id:string;role:'administrator'|'evaluator';owner_id:string;csrf_token:string};
+type Session={id:string;role:'administrator';owner_id:string;csrf_token:string};
 const usd=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0});
 const MAX_TURNS=14;
 const EMPTY_FORM={first_name:'',last_name:'',phone:'',email:''};
 function dateText(s:string){return s==='Immediate'?'Ready now':s||'Not specified';}
 function Field({label,value}:{label:string;value:string|number|boolean|null|undefined}){const str=value==null?'Not specified':typeof value==='boolean'?(value?'Yes':'No'):String(value);return <div className="detail-field"><small>{label}</small><strong>{str}</strong></div>}
-function safeLink(href:string|undefined){return !!href&&/^\/demo-assets\/[A-Za-z0-9_.-]+\.(svg|pdf)$/i.test(href)}
+function safeLink(href:string|undefined){
+  if(!href)return false;
+  if(/^\/demo-assets\/[A-Za-z0-9_.-]+\.(svg|pdf)$/i.test(href))return true;
+  if(/^\/properties\/[A-Za-z0-9-]+\/gallery\/?$/.test(href))return true;
+  try{
+    const u=new URL(href);
+    const trustedHost=u.hostname==='testing-hermes-agent-alpha.vercel.app'||(typeof window!=='undefined'&&u.origin===window.location.origin);
+    return (u.protocol==='https:'||(u.protocol==='http:'&&u.hostname==='localhost'&&typeof window!=='undefined'&&u.origin===window.location.origin))&&trustedHost&&(/^\/properties\/[A-Za-z0-9-]+\/gallery\/?$/.test(u.pathname)||/^\/demo-assets\/[A-Za-z0-9_.-]+\.pdf$/i.test(u.pathname))&&!u.search&&!u.hash;
+  }catch{return false;}
+}
 function ChatMarkdown({text}:{text:string}){return <Markdown remarkPlugins={[remarkGfm]} components={{a:({href,children})=>safeLink(href)?<a href={href} target="_blank" rel="noopener noreferrer">{children}</a>:<span title="External or unapproved link hidden">{children}</span>}}>{text}</Markdown>}
 function PropertyDetails({unit,project,onClose}:{unit:Unit;project:Catalog['project_info'];onClose:()=>void}){
   const [photo,setPhoto]=useState(0);
@@ -48,7 +57,7 @@ function PropertyDetails({unit,project,onClose}:{unit:Unit;project:Catalog['proj
       <h3>Property type description</h3><p>{unit.property_type_description||'No confirmed description available.'}</p>
       <h3>Verified property features</h3><div className="detail-grid">{Object.keys(unit.confirmed_features||{}).length?Object.entries(unit.confirmed_features||{}).map(([key,val])=><Field key={key} label={key.replaceAll('_',' ')} value={val}/>):<p>No verified features are published.</p>}</div>
       <h3>Project amenities</h3><div className="amenities-inline">{project.amenities.map(a=><span key={a}>{a}</span>)}</div>
-      <h3>Published documents & gallery</h3><div className="asset-links">{img.map((href,i)=><a key={href} href={href} target="_blank" rel="noopener noreferrer"><Images size={14}/> Image {i+1}</a>)}{unit.media.floorplan_brochure_pdf?<a href={unit.media.floorplan_brochure_pdf} target="_blank" rel="noopener noreferrer"><FileText size={14}/> Floor plan / brochure PDF</a>:<span>No unit PDF published</span>}{project.general_brochure_pdf&&<a href={project.general_brochure_pdf} target="_blank" rel="noopener noreferrer"><FileText size={14}/> Project brochure</a>}</div>
+      <h3>Gallery & property documents</h3><div className="asset-links">{unit.media.gallery_url?<a href={unit.media.gallery_url} target="_blank" rel="noopener noreferrer"><Images size={14}/> View gallery ({img.length})</a>:<span>No property gallery published</span>}{unit.media.documents.length?unit.media.documents.filter(d=>d.scope==='unit'&&d.unit_id===unit.blackpenguin_unit_id).map(doc=><a key={doc.url} href={doc.url} target="_blank" rel="noopener noreferrer"><FileText size={14}/> {doc.title}</a>):<span>No property PDF published</span>}</div>
       <h3>Project context</h3><div className="detail-grid"><Field label="Developer" value={project.developer}/><Field label="Development status" value={project.development_status}/><Field label="Project type" value={project.project_type}/><Field label="Location" value={`${project.location.street_address}, ${project.location.city}`}/></div>
       <details className="inspector"><summary>Inspect approved unit JSON</summary><pre>{JSON.stringify(unit,null,2)}</pre></details><small className="fineprint">The displayed facts are synthetic published information, not real estate offers. No internal sources are exposed.</small>
     </div>
@@ -58,7 +67,6 @@ function PropertyDetails({unit,project,onClose}:{unit:Unit;project:Catalog['proj
 export default function Page(){
   const [catalog,setCatalog]=useState<Catalog|null>(null);
   const [auth,setAuth]=useState<Session|null>(null);
-  const [loginRole,setLoginRole]=useState<'administrator'|'evaluator'>('evaluator');
   const [credential,setCredential]=useState('');
   const [leads,setLeads]=useState<Summary[]>([]);
   const [active,setActive]=useState<Lead|null>(null);
@@ -79,7 +87,7 @@ export default function Page(){
   useEffect(()=>{fetch('/api/catalog').then(r=>r.json()).then(setCatalog).catch(()=>setError('Cannot load the published catalog.'));
     fetch('/api/me',{credentials:'same-origin'}).then(r=>r.ok?r.json():null).then(s=>{if(s)setAuth(s)}).catch(()=>{});},[]);
   useEffect(()=>{if(auth)void refreshLeads();else{setLeads([]);setActive(null)}},[auth,refreshLeads]);
-  // A deleted lead disappears from other evaluators' open tabs; stale UI never
+  // A deleted lead disappears from other administrators' open tabs; stale UI never
   // remains an alternate history viewer after the server purges the record.
   useEffect(()=>{if(!auth)return;const id=setInterval(()=>{void refreshLeads();if(active&&!busy){fetch(`/api/leads/${active.id}`,{credentials:'same-origin'}).then(r=>{
     if(r.status===404){setActive(null);setShowLeads(false);return null;}
@@ -87,7 +95,7 @@ export default function Page(){
   }).then(rec=>{if(rec&&rec.revision!==active.revision)setActive(rec)}).catch(()=>{});}},20000);
     return()=>clearInterval(id);},[auth,active,busy,refreshLeads]);
   useEffect(()=>{if(chatBody.current&&!showJump)chatBody.current.scrollTo({top:chatBody.current.scrollHeight,behavior:'smooth'})},[active?.messages,showJump,busy]);
-  async function login(){setBusy(true);setError('');try{const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({role:loginRole,credential})});const data=await r.json();if(!r.ok)throw new Error(data.detail||'Authentication failed');setAuth(data);setCredential('');}catch(e){setError(e instanceof Error?e.message:'Unable to log in')}finally{setBusy(false)}}
+  async function login(){setBusy(true);setError('');try{const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({credential})});const data=await r.json();if(!r.ok)throw new Error(data.detail||'Authentication failed');setAuth(data);setCredential('');}catch(e){setError(e instanceof Error?e.message:'Unable to log in')}finally{setBusy(false)}}
   async function logout(){if(!auth)return;try{await fetch('/api/auth/logout',{method:'POST',headers:authorizedHeaders})}finally{setAuth(null);setActive(null)}}
   async function newLead(){if(!auth||busy)return;setBusy(true);setError('');try{const r=await fetch('/api/leads',{method:'POST',headers:authorizedHeaders,body:JSON.stringify(form)});const data=await r.json();if(!r.ok)throw new Error(data.detail||'Failed to create lead');setActive(data);setForm({...EMPTY_FORM});setShowCreate(false);setLeftView('inventory');await refreshLeads();}catch(e){setError(e instanceof Error?e.message:'Unable to create lead')}finally{setBusy(false)}}
   async function send(){const message=draft.trim();if(!auth||!active||!message||busy||state?.turn_count===MAX_TURNS)return;setBusy(true);setError('');setDraft('');const original=active;setActive({...active,messages:[...active.messages,{id:'pending',role:'user',content:message,created_at:new Date().toISOString()}]});try{const r=await fetch(`/api/leads/${active.id}/chat`,{method:'POST',headers:authorizedHeaders,body:JSON.stringify({message})});const data=await r.json();if(!r.ok)throw new Error(data.detail||'Failed to contact Hermes');setActive(data.lead);setCalendarTick(x=>x+1);void refreshLeads();setShowJump(false);}catch(e){setError(e instanceof Error?e.message:'Conversation failed');setActive(original);setDraft(message)}finally{setBusy(false)}}
@@ -97,7 +105,7 @@ export default function Page(){
     <aside className="sidebar"><div className="bp-logo"><span>black</span><b>penguin</b><small>.ai</small></div><nav><a href="#conversation" className="selected-nav"><MessageCircle size={17}/> Hermes agent</a></nav><div className="side-foot"><ShieldCheck size={15}/> Synthetic evaluation demo</div></aside>
     <div className="shell-content"><header className="topbar"><div className="workspace-name"><strong>Hermes Agent Lab</strong><span>Real estate evaluation workspace</span></div><div className="topbar-actions"><small>OpenRouter · gpt-4o-mini</small>{auth?<><span className="role-tag">{auth.role}</span><button className="ghost" onClick={()=>void logout()}><LogOut size={14}/> Sign out</button></>:<span className="role-tag">Sign in required</span>}</div></header>
       {error&&<div className="global-error" role="alert"><Info size={14}/>{error}<button onClick={()=>setError('')}><X size={13}/></button></div>}
-      {!auth?<div className="login-shell"><div className="login-panel"><LockKeyhole size={24}/><h1>Access the Hermes evaluation workspace</h1><p>Use fictional leads only. A demo invite opens an isolated evaluator workspace; an administrator can inspect and delete all leads.</p><div className="toggle-row"><button className={loginRole==='evaluator'?'current':''} onClick={()=>setLoginRole('evaluator')}>Evaluator</button><button className={loginRole==='administrator'?'current':''} onClick={()=>setLoginRole('administrator')}>Administrator</button></div><label>{loginRole==='administrator'?'Administrator password':'Private demo invite code'}<input type="password" value={credential} onChange={e=>setCredential(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')void login()}}/></label><button className="primary" disabled={!credential||busy} onClick={()=>void login()}>Open workspace</button><small>Administrator access requires a separate server-side password.</small></div></div>:
+      {!auth?<div className="login-shell"><div className="login-panel"><LockKeyhole size={24}/><h1>Access the Hermes evaluation workspace</h1><p>Sign in to manage fictional leads, their conversations and appointment history.</p><label>Administrator password<input type="password" value={credential} onChange={e=>setCredential(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')void login()}}/></label><button className="primary" disabled={!credential||busy} onClick={()=>void login()}>Open workspace</button><small>Administrator-only demo · use fictional contact information.</small></div></div>:
       <main className="workspace" id="conversation">
         <section className="panel inventory-panel"><div className="panel-top"><h2>{leftView==='inventory'?'Property inventory':'Sales calendar'}</h2><div className="toggle-row"><button className={leftView==='inventory'?'current':''} onClick={()=>setLeftView('inventory')}>Inventory</button><button className={leftView==='calendar'?'current':''} onClick={()=>setLeftView('calendar')}>Calendar</button></div></div>
           <div className="panel-scroll">

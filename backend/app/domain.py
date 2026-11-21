@@ -8,6 +8,7 @@ from __future__ import annotations
 import calendar
 import copy
 import json
+import os
 import re
 import uuid
 from datetime import date, datetime, time, timedelta
@@ -352,13 +353,24 @@ def unit_media(unit_id: str) -> dict:
     if not unit:
         return {'error': f'Unknown residential unit: {unit_id}'}
     media = unit['media']
+    gallery_path = media.get('gallery_url')
+    # Never construct URLs from untrusted Host headers. Configure the public
+    # domain for custom production domains or Preview environments.
+    public_base = os.environ.get('DEMO_PUBLIC_BASE_URL', 'https://testing-hermes-agent-alpha.vercel.app').rstrip('/')
+    if not (public_base.startswith('https://') or public_base.startswith('http://localhost:')):
+        public_base = 'https://testing-hermes-agent-alpha.vercel.app'
+    documents = [d for d in media.get('documents', [])
+                 if d.get('scope') == 'unit' and d.get('unit_id') == unit['blackpenguin_unit_id']]
     return {
-        'ok': True, 'unit_id': unit['unit_id'],
-        'gallery_urls': media['gallery_urls'],
-        'floorplan_brochure_pdf': media['floorplan_brochure_pdf'],
-        'gallery_available': bool(media['gallery_urls']),
-        'floorplan_pdf_available': bool(media['floorplan_brochure_pdf']),
-        'note': 'Images and PDF brochures are synthetic demo documents.'
+        'ok': True,
+        'unit_id': unit['unit_id'],
+        'gallery_url': f'{public_base}{gallery_path}' if gallery_path else None,
+        'gallery_available': bool(gallery_path),
+        'image_count': len(media.get('gallery_urls', [])),
+        'documents': [{'type': d['type'], 'title': d['title'], 'url': f"{public_base}{d['url']}"}
+                      for d in documents],
+        'unit_pdf_available': bool(documents),
+        'note': 'Only approved synthetic unit-specific PDFs are returned. Never substitute a project brochure.'
     }
 
 

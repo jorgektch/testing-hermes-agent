@@ -106,7 +106,17 @@
           "/demo-assets/BP-A201-01.svg",
           "/demo-assets/BP-A201-02.svg"
         ],
-        "floorplan_brochure_pdf": "/demo-assets/BP-A201-floorplan.pdf"
+        "floorplan_brochure_pdf": "/demo-assets/BP-A201-floorplan.pdf",
+        "documents": [
+          {
+            "type": "floor_plan",
+            "title": "Synthetic unit fact sheet: A-201",
+            "url": "/demo-assets/BP-A201-floorplan.pdf",
+            "scope": "unit",
+            "unit_id": "77777777-7777-4777-8777-777777777773"
+          }
+        ],
+        "gallery_url": "/properties/A-201/gallery"
       },
       "demo_inventory_last_updated_at": "2026-11-18T15:00:00Z",
       "inventory_is_live": false
@@ -169,7 +179,9 @@
           "/demo-assets/BP-A204-01.svg",
           "/demo-assets/BP-A204-02.svg"
         ],
-        "floorplan_brochure_pdf": null
+        "floorplan_brochure_pdf": null,
+        "documents": [],
+        "gallery_url": "/properties/A-204/gallery"
       },
       "demo_inventory_last_updated_at": "2026-11-20T00:00:00Z",
       "inventory_is_live": false
@@ -243,7 +255,17 @@
       ],
       "media": {
         "gallery_urls": [],
-        "floorplan_brochure_pdf": "/demo-assets/BP-H101-floorplan.pdf"
+        "floorplan_brochure_pdf": "/demo-assets/BP-H101-floorplan.pdf",
+        "documents": [
+          {
+            "type": "floor_plan",
+            "title": "Synthetic unit fact sheet: H-101",
+            "url": "/demo-assets/BP-H101-floorplan.pdf",
+            "scope": "unit",
+            "unit_id": "77777777-7777-4777-8777-777777777771"
+          }
+        ],
+        "gallery_url": null
       },
       "demo_inventory_last_updated_at": "2026-11-18T15:00:00Z",
       "inventory_is_live": false
@@ -313,7 +335,17 @@
           "/demo-assets/BP-H104-01.svg",
           "/demo-assets/BP-H104-02.svg"
         ],
-        "floorplan_brochure_pdf": "/demo-assets/BP-H104-floorplan.pdf"
+        "floorplan_brochure_pdf": "/demo-assets/BP-H104-floorplan.pdf",
+        "documents": [
+          {
+            "type": "floor_plan",
+            "title": "Synthetic unit fact sheet: H-104",
+            "url": "/demo-assets/BP-H104-floorplan.pdf",
+            "scope": "unit",
+            "unit_id": "b6699608-a056-5db0-877e-e3a54117245d"
+          }
+        ],
+        "gallery_url": "/properties/H-104/gallery"
       },
       "demo_inventory_last_updated_at": "2026-11-20T00:00:00Z",
       "inventory_is_live": false
