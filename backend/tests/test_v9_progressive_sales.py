@@ -164,7 +164,10 @@ def test_media_tool_refuses_unsolicited_media_and_releases_one_requested_link(mo
     domain.begin_turn(state, 'Photos of H-201 please')
     text = hermes_runtime.chat('Photos of H-201 please', [], state)['reply']
     assert text in state['_approved_media_urls_this_turn']
-    assert delivery_policy.validate_outbound(text,state) == text
+    delivered=delivery_policy.validate_outbound(text,state)
+    assert delivered.startswith(text)
+    assert 'PDF fact sheet' in delivered
+    assert not any(d['url'] in delivered for d in domain.unit_media('H-201')['documents'])
 
 
 def test_single_media_offer_accepts_yes_but_ambiguous_offer_does_not():
