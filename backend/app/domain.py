@@ -81,6 +81,7 @@ def blank_state() -> dict:
         },
         'stage': 'New Meta lead',
         'shortlisted_unit_ids': [],
+        'exploring_unit_id': None,  # discussed house, not a visit commitment
         'booked_visits': [],
         'booking_proposal': None,
         'property_interests': [],
@@ -132,6 +133,21 @@ def end_turn(state: dict, reply: str) -> None:
     bp['sales_conversations']['continuity_json']['waiting_for_lead'] = True
     state.pop('_active_source_message_id', None)
     state.pop('_active_source_message_text', None)
+    # A simple explicit single-media offer can be accepted with "yes" next turn.
+    # A combined "photos or visit?" question is ambiguous and never preauthorized.
+    text = reply.lower()
+    focused = state.get('exploring_unit_id') or state['lead'].get('interest_unit_id')
+    photo_offer = bool(re.search(r'\b(photos?|pictures?|gallery|images?)\b', text))
+    pdf_offer = bool(re.search(r'\b(pdf|brochures?|fact.?sheets?|floor.?plans?)\b', text))
+    multiple_choices = bool(re.search(r'\b(visit|tour|book|appointment|schedule)\b', text))
+    if focused and '?' in reply and photo_offer != pdf_offer and not multiple_choices:
+        state['pending_media_offer'] = {'unit_id': focused,
+                                        'kind': 'gallery' if photo_offer else 'documents'}
+    else:
+        state['pending_media_offer'] = None
+    state.pop('_approved_media_urls_this_turn', None)
+    state.pop('_matching_options_this_turn', None)
+    state.pop('_details_for_current_turn', None)
 
 
 def _capture_bp_facts(state: dict, changed: dict) -> None:
@@ -353,18 +369,68 @@ def evaluate_properties(state: dict, max_budget_usd: int,
     state['shortlisted_unit_ids'] = [u['unit_id'] for u in matches]
     state['stage'] = 'Properties matched' if matches else 'Exploring alternatives'
     record(state, 'matching', f'{len(matches)} matching properties · ${budget:,} budget')
+    # Search tool returns an SMS-sized decision overview, never full cards,
+    # brochures, gallery links or amenities. A separate tool loads one house.
+    def compact(unit: dict) -> dict:
+        fields = ('unit_id', 'commercial_name', 'property_type', 'bedrooms',
+                  'price_usd', 'available_from_date', 'status',
+                  'ready_by_purchase_deadline', 'exceeds_budget_by_usd', 'mismatch_reason')
+        return {key: unit[key] for key in fields if key in unit}
     return {
         'ok': True,
         'applied_criteria': {'max_budget_usd': budget, 'min_bedrooms': beds,
                              'preferred_property_type': chosen_type or 'Either',
                              'transaction_type': 'sale'},
-        'matching_properties': matches,
-        'out_of_budget_properties': out_budget,
-        'other_nonmatching_properties': other,
+        'matching_properties': [compact(u) for u in matches],
+        'out_of_budget_properties': [compact(u) for u in out_budget],
+        'other_nonmatching_properties': [compact(u) for u in other],
+        'next_action': 'Offer a brief list of matching houses and ask which ONE to explore; no unsolicited media.',
         'interpreted_purchase_deadline': deadline.isoformat() if deadline else None,
         'timeframe_interpretation': interpretation,
         'note': 'Only fictional houses for sale are listed. The maximum declared budget is a hard cap; over-budget homes are NOT matches and must not be proactively recommended. Financing details are discussed only at the onsite visit.'
     }
+
+
+def _buyer_mentioned_house(state: dict, unit_id: str) -> bool:
+    """Require direct buyer reference, optionally by ordinal from the offered list."""
+    spoken = str(state.get('_active_source_message_text') or '').lower()
+    if str(unit_id).lower() in spoken:
+        return True
+    shortlist = state.get('shortlisted_unit_ids') or []
+    import re
+    for index, terms in ((0, r'\b(?:first(?: one| house| option)?|1st|option 1|#1)\b'),
+                         (1, r'\b(?:second(?: one| house| option)?|2nd|option 2|#2)\b'),
+                         (2, r'\b(?:third(?: one| house| option)?|3rd|option 3|#3)\b')):
+        if index < len(shortlist) and shortlist[index] == unit_id and re.search(terms, spoken):
+            return True
+    return False
+
+
+def unit_details(state: dict, unit_id: str) -> dict:
+    """Expose verified details for ONE requested house, never all catalog units.
+
+    The current buyer turn must name that house, or it must already be the
+    conversational focus. Matching a search result alone is not buyer interest.
+    """
+    unit = next((u for u in read_catalog()['properties']
+                 if u['unit_id'].casefold() == str(unit_id).strip().casefold()), None)
+    if unit is None:
+        return {'error': 'Unknown or unpublished house.'}
+    focused = state.get('exploring_unit_id') == unit['unit_id']
+    selected = state['lead'].get('interest_unit_id') == unit['unit_id']
+    if state.get('_active_source_message_id') and not _buyer_mentioned_house(state, unit['unit_id']) and not (focused or selected):
+        return {'error': 'Ask which house the buyer wants to explore before loading details.'}
+    state['exploring_unit_id'] = unit['unit_id']
+    return {'ok': True, 'unit_id': unit['unit_id'],
+            'commercial_name': unit['commercial_name'],
+            'property_type': unit['property_type'],
+            'bedrooms': unit['bedrooms'], 'bathrooms': unit['bathrooms'],
+            'price_usd': unit['price_usd'], 'currency': unit.get('currency', 'USD'),
+            'area_sqm': unit.get('area_sqm'), 'lot_area_m2': unit.get('lot_area_m2'),
+            'confirmed_features': unit.get('confirmed_features', {}),
+            'highlights': unit.get('highlights', []),
+            'status': unit['status'], 'available_from_date': unit['available_from_date'],
+            'note': 'Verified information for this house only. Media require separate buyer request.'}
 
 
 def unit_media(unit_id: str) -> dict:
@@ -519,11 +585,16 @@ def track_property_interest(state: dict, unit_id: str, status: str = 'discussed'
         return {'error': 'Unknown or non-public residential unit.'}
     if status not in ('discussed', 'considering', 'interested'):
         return {'error': 'Invalid interest status.'}
+    if state.get('_active_source_message_id') and not _buyer_mentioned_house(state, unit_id):
+        if state.get('exploring_unit_id') != unit_id and state['lead'].get('interest_unit_id') != unit_id:
+            return {'error': 'The lead has not referred to that house.'}
     if status == 'interested' and state.get('_active_source_message_id'):
-        spoken = str(state.get('_active_source_message_text') or '').upper()
-        prior_selected = state['lead'].get('interest_unit_id') == unit_id
-        if unit_id.upper() not in spoken and not prior_selected:
-            return {'error': 'Ask the lead to explicitly name the house code before selecting it.'}
+        import re
+        words = str(state.get('_active_source_message_text') or '').lower()
+        # Merely asking for information or photos is NOT visit intent.
+        visit_intent = re.search(r'\b(visit|tour|book|schedule|see in person|appointment|choose|select|pick|want|interested|like|prefer)\b', words)
+        if not visit_intent and state['lead'].get('interest_unit_id') != unit_id:
+            return {'error': 'Asking about a house is not permission to select it for a visit.'}
     existing = state.setdefault('property_interests', [])
     # A mention cannot downgrade a prior explicit interest.
     rank = {'discussed': 0, 'considering': 1, 'interested': 2}
@@ -536,6 +607,8 @@ def track_property_interest(state: dict, unit_id: str, status: str = 'discussed'
                          'source_message_id': state.get('_active_source_message_id')})
     if status == 'interested':
         state['lead']['interest_unit_id'] = unit_id
+    if _buyer_mentioned_house(state, unit_id) or status == 'interested':
+        state['exploring_unit_id'] = unit_id
     return {'ok': True, 'property_interests': existing,
             'active_unit_id': state['lead'].get('interest_unit_id')}
 
@@ -583,9 +656,11 @@ def update_lead(state: dict, **kwargs: Any) -> dict:
             choices={u['unit_id'] for u in read_catalog()['properties']}
             if value not in choices:
                 return {'error': f'Unknown available unit: {value}'}
-            if (state.get('_active_source_message_id') and value != lead.get('interest_unit_id') and
-                    str(value).upper() not in str(state.get('_active_source_message_text') or '').upper()):
-                return {'error': 'Ask the lead to explicitly name the house code before selecting it.'}
+            if state.get('_active_source_message_id') and value != lead.get('interest_unit_id'):
+                spoken = str(state.get('_active_source_message_text') or '').lower()
+                if not _buyer_mentioned_house(state, str(value)) or not re.search(
+                        r'\b(visit|tour|book|schedule|see in person|appointment|choose|select|pick|want|interested|like|prefer)\b', spoken):
+                    return {'error': 'A question about a house is not explicit visit selection.'}
         if key == 'budget_currency':
             value=str(value).upper()
             if not re.fullmatch(r'[A-Z]{3}',value):
@@ -891,6 +966,7 @@ def profile_snapshot(state: dict) -> dict:
     return {
         'lead': dict(state.get('lead') or {}),
         'stage': state.get('stage'),
+        'exploring_unit_id': state.get('exploring_unit_id'),
         'property_interests': list(state.get('property_interests') or []),
         'ui_fact_evidence': dict(state.get('ui_fact_evidence') or {}),
         'facts': {k: dict(v) for k,v in facts.items()},

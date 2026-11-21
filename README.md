@@ -201,3 +201,7 @@ The v8 improvement adds:
 - Optional pinned Production connection with the **paired** `DEMO_PERSISTENT_TURSO_URL` and `DEMO_PERSISTENT_TURSO_TOKEN`, which overrides the Marketplace-managed URL/token pair only when *both* are supplied.
 
 Full contract, deployment instructions, safety considerations and acceptance tests: [V8_BOOKING_SMS_EXPORT.md](docs/V8_BOOKING_SMS_EXPORT.md).
+
+## v9 — Progressive Hermes sales conversations
+
+See [docs/V9_PROGRESSIVE_SALES.md](docs/V9_PROGRESSIVE_SALES.md). The first greeting is now part of the Hermes continuation history, matching results are intentionally brief, and a new `get_unit_details` tool supplies facts for the single house the lead asks about. Media links require an explicit buyer request and are checked against approved URLs before saving a turn. The right sidebar distinguishes the house being explored from the house chosen for an onsite visit. No new Turso tables or credential changes are required.

@@ -198,14 +198,42 @@ def _begin_turn(state: dict, message: str) -> None:
         raise ValueError(verified['error'])
 
 
+def restore_initial_greeting(history: list[dict], messages: list[dict]) -> list[dict]:
+    """Recover greeting for legacy conversations without mutating their visible history.
+
+    The greeting used to exist only in messages, so Hermes started the first
+    turn without the introduction. Modern lead creation seeds it server-side.
+    This backfill is read-only, deduplicated and persisted on the next turn.
+    """
+    result = list(history)
+    if not messages:
+        return result
+    first = messages[0]
+    greeting = str(first.get('content') or '').strip()
+    if first.get('role') != 'assistant' or 'AI Sales Agent assigned to help you' not in greeting:
+        return result
+    if any(item.get('role') == 'assistant' and greeting in str(item.get('content') or '') for item in result):
+        return result
+    # OpenAI message format supported by Hermes.run_conversation.
+    # Keep any historic system message at the front.
+    index = 0
+    while index < len(result) and result[index].get('role') == 'system':
+        index += 1
+    result.insert(index, {'role':'assistant', 'content': greeting})
+    return result
+
+
 def _finish_turn(lead_id: str, rec: dict, state: dict, auth: dict,
                  message: str, *, on_tool_state=None) -> dict:
     occupied = db.occupied_by_advisor()
     options = {'extra_occupied': occupied}
     if on_tool_state is not None:
         options['on_tool_state'] = on_tool_state
-    result = chat(message, rec['hermes_history'], state, **options)
+    history = restore_initial_greeting(rec['hermes_history'], rec.get('messages', []))
+    result = chat(message, history, state, **options)
     safe_reply = domain.redact_unconfirmed_advisor_names(result['reply'], state)
+    from app.delivery_policy import validate_outbound
+    safe_reply = validate_outbound(safe_reply, state)
     domain.end_turn(state, safe_reply)
     state['turn_count'] += 1
     updated = db.save_turn(auth, lead_id, rec['revision'], state,

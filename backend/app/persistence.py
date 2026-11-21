@@ -346,9 +346,11 @@ def create_lead(auth: dict, first_name: str, last_name: str, email: str, phone: 
         con.execute('''INSERT INTO leads(id,owner_id,project_id,first_name,last_name,email,phone,created_at,updated_at)
                        VALUES(?,?,?,?,?,?,?,?,?)''',
                     (lead_id,auth['owner_id'],project_id,first_name,last_name,email,phone,iso(),iso()))
-        con.execute('''INSERT INTO conversations(id,lead_id,state_json,created_at,updated_at)
-                       VALUES(?,?,?,?,?)''',
-                    (conv_id,lead_id,json.dumps(state,ensure_ascii=False),iso(),iso()))
+        con.execute('''INSERT INTO conversations(id,lead_id,state_json,hermes_history_json,created_at,updated_at)
+                       VALUES(?,?,?,?,?,?)''',
+                    (conv_id,lead_id,json.dumps(state,ensure_ascii=False),
+                     json.dumps([{'role': 'assistant', 'content': '\n'.join(initial_sms)}],
+                                ensure_ascii=False),iso(),iso()))
         for index, segment in enumerate(initial_sms, 1):
             con.execute('''INSERT INTO messages(id,conversation_id,role,content,created_at,sequence_number)
                            VALUES(?,?,?,?,?,?)''',

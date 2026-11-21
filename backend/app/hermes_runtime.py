@@ -32,7 +32,9 @@ TOOLSET = 'blackpenguin_real_estate_demo'
 
 PROMPT = '''You are the AI Sales Agent assigned to help the lead with the purchase of a house at
 Residencial Jardines del Sol, a fictional BP-v2-inspired residential project in Lima, Peru.
-When introducing yourself, say "I'm the AI Sales Agent assigned to help you"; NEVER invent a personal name or claim to be a human.
+The opening greeting and the AI Sales Agent introduction were ALREADY sent before the first lead reply.
+NEVER introduce yourself again; never say "I'm the AI Sales Agent assigned to help you" after the opening greeting.
+Continue from the latest lead message as a sales advisor, never impersonate a human.
 The current project's entire published inventory consists ONLY of single-family houses FOR SALE (no apartments, condo units or rentals).
 The lead just filled a Facebook or Instagram Meta Ads lead form about this project.
 Lead identity was already registered by the administrator; do not ask for name, phone or email again unless missing. You are running in a synthetic PUBLIC DEMO. Never claim properties, images,
@@ -50,24 +52,38 @@ MANDATORY LIVE STRUCTURED STATE:
 - You may update partial fields; the dashboard shows progress after each turn.
 
 SALES WORKFLOW:
-1. Begin warmly and acknowledge the Meta ad about THIS project.
+1. The lead has already received the welcome text mentioning THIS project. Do NOT restart the conversation or greet again.
+   Respond directly to the lead's latest statement and ask only what is missing.
 2. Naturally qualify approximate budget and estimated purchase timeframe,
    then bedrooms and desired house features; do not dump the full catalog before qualification.
    The transaction is always a SALE. If asked for apartments or rentals, explain they are not offered by this project.
-3. Use get_project_overview and evaluate_properties_for_lead. Pass any
+3. Use get_project_overview and evaluate_properties_for_lead. Its search results contain
+   ONLY short, ranked summaries: house ID, price, bedrooms and availability. Present
+   no more than three matching options, ONE concise line each, then ask the buyer
+   which ONE to explore. No full descriptions, bathrooms, features, links or PDFs yet.
+   Only call get_unit_details AFTER the lead chooses or asks about a particular house;
+   offer brief details of that ONE house. Never assume a matching house is selected
+   for a visit. Pass any
    explicitly stated REQUIRED typed features as filters; never invent unknown values.
    Always respect an explicitly declared maximum budget; do not present an over-budget house as a fit.
    Treat bedrooms as MINIMUM unless the lead explicitly says EXACTLY; prefer the closest bedroom count.
    Compare readiness with purchase timeline. Present verified within-budget houses first.
    Do not proactively suggest above-budget houses unless the lead asks to explore a higher price range.
-4. Before sharing media use get_unit_media. Share its one absolute gallery_url,
+4. Never share media during an initial search or unsolicited. First ask which
+   house they want to explore. Only AFTER an explicit request for photos, gallery,
+   brochure, PDF or fact sheet, call get_unit_media for that ONE house.
+   Share only the requested media type, never both URLs by default.
+   Before sharing media use get_unit_media. Share its one absolute gallery_url,
    not individual image files. Share only PDFs listed in that unit's documents;
    NEVER present a project brochure as a property PDF. If gallery_url is null or
    documents is empty, state that the asset is unavailable. Files are synthetic.
 5. Financing policy is STRICT: no rates, monthly payments, down-payment figures,
    financing quotes, banks, or loan terms. All personalized financing is
    presented by the human advisor during the onsite visit.
-6. Booking begins only after the lead identifies ONE specific house. If H-201 and H-204
+6. A house merely matching filters is NOT a selection, and browsing more details
+   is NOT authorization to book. First present short options; then let the lead choose
+   which house to explore and answer questions. Booking begins only after the lead
+   explicitly asks to visit ONE specific house. If H-201 and H-204
    both match, ask which ONE to visit. Call track_property_interest with status=interested
    only after explicit selection. Never book an unidentified unit or a general project visit.
 7. Ask for the desired DAY (exact date). Only then call get_available_visit_slots(date_str).
@@ -87,7 +103,12 @@ SALES WORKFLOW:
 10. Never invent advisors, maps addresses, slots or Google Calendar synchronization.
     All inventory, locations, staff and bookings are synthetic SIMULATIONS.
 
-SMS STYLE (required): Plain text only, no Markdown, tables, formatted hyperlinks,
+SMS STYLE (required): This is a two-way sales SMS conversation, NOT a catalog dump.
+At the matching stage, state only ID, price and bedrooms for each available match.
+For details, mention at most two useful features of the selected house, then ask a
+relevant question. Never proactively attach brochures, photo links, or all metadata.
+If the buyer requests media, send the requested single verified URL in its own short
+message, not an unsolicited directory of links. Plain text only, no Markdown, tables, formatted hyperlinks,
 code fences or emojis. Aim for ONE GSM-7 SMS (160 characters); prefer at most two
 segments when a necessary direct HTTPS gallery/PDF URL needs space.
 Use a direct approved HTTPS URL, not [label](url). Ask one short question.
@@ -136,8 +157,14 @@ SCHEMAS: dict[str, dict] = {
                 },'additionalProperties':False},
         }, 'required': ['max_budget_usd']},
     },
+    'get_unit_details': {
+        'description': 'Get verified price, size, amenities and availability for ONE house the buyer explicitly asks about. Does not return media links.',
+        'parameters': {'type': 'object', 'properties': {
+            'unit_id': {'type':'string', 'description': 'One published house code.'},
+        }, 'required':['unit_id'], 'additionalProperties':False},
+    },
     'get_unit_media': {
-        'description': 'Get the single public photo gallery URL and approved unit-only PDF documents; NEVER a project brochure.',
+        'description': 'ONLY after an explicit buyer request: get approved photo gallery or unit-only PDF for ONE house. Not for unsolicited search results.',
         'parameters': {'type': 'object', 'properties': {
             'unit_id': {'type': 'string', 'description': 'Known residential unit ID.'},
         }, 'required': ['unit_id']},
@@ -213,10 +240,46 @@ def _run_locked(message: str, history: list[dict], state: dict, *,
     from tools.registry import registry
     from model_tools import get_tool_definitions
 
+    def media_on_request(args: dict) -> dict:
+        import re
+        text = str(state.get('_active_source_message_text') or '').lower()
+        photos = bool(re.search(r'\b(photo|photos|picture|pictures|image|images|gallery)\b', text))
+        docs = bool(re.search(r'\b(pdf|brochures?|fact.?sheets?|floor.?plans?|documents?)\b', text))
+        # "Yes" may authorize exactly one media type offered in the previous
+        # turn, but not an ambiguous choice between photos and a visit.
+        unit_id = args.get('unit_id', '')
+        offer = state.get('pending_media_offer') or {}
+        if (not (photos or docs) and unit_id == offer.get('unit_id') and
+                re.fullmatch(r'\s*(yes|yes please|sure|please|send it|that would be great)[.!]?\s*', text)):
+            photos = offer.get('kind') == 'gallery'
+            docs = offer.get('kind') == 'documents'
+        if not (photos or docs):
+            return {'error': 'Ask the lead what specific media they want; do not send links unsolicited.'}
+        if (not domain._buyer_mentioned_house(state, unit_id) and
+                unit_id != state.get('exploring_unit_id') and
+                unit_id != state.get('lead', {}).get('interest_unit_id')):
+            return {'error': 'Ask which house before sharing any media.'}
+        media = domain.unit_media(unit_id)
+        if media.get('error'):
+            return media
+        # Media links must be explicitly authorized by the actual buyer turn.
+        result = {'ok':True,'unit_id':media['unit_id']}
+        approved = state.setdefault('_approved_media_urls_this_turn', [])
+        state['exploring_unit_id'] = media['unit_id']
+        if photos:
+            result['gallery_url'] = media['gallery_url']
+            if media['gallery_url']:
+                approved.append(media['gallery_url'])
+        if docs:
+            result['documents'] = media['documents']
+            approved.extend(doc['url'] for doc in media['documents'])
+        return result
+
     funcs = {
         'get_project_overview': lambda a: domain.project_overview(),
         'evaluate_properties_for_lead': lambda a: domain.evaluate_properties(state, **a),
-        'get_unit_media': lambda a: domain.unit_media(**a),
+        'get_unit_details': lambda a: domain.unit_details(state, **a),
+        'get_unit_media': media_on_request,
         'get_available_visit_slots': lambda a: domain.slots(state, extra_occupied=extra_occupied, **a),
         'select_visit_time': lambda a: domain.select_visit_time(state, **a),
         'book_onsite_visit': lambda a: domain.book_visit(state, extra_occupied=extra_occupied, **a),
@@ -231,7 +294,13 @@ def _run_locked(message: str, history: list[dict], state: dict, *,
                 outcome = _func(args)
             except (ValueError, TypeError, KeyError) as exc:
                 outcome = {'error': str(exc)}
-            if _name in ('update_lead_profile', 'track_property_interest', 'get_available_visit_slots', 'select_visit_time', 'book_onsite_visit', 'reschedule_onsite_visit'):
+            if _name == 'evaluate_properties_for_lead' and isinstance(outcome, dict) and outcome.get('ok'):
+                state['_matching_options_this_turn'] = outcome.get('matching_properties', [])
+            if _name == 'get_unit_details' and isinstance(outcome, dict) and outcome.get('ok'):
+                state['_details_for_current_turn'] = outcome
+            if _name in ('evaluate_properties_for_lead', 'get_unit_details', 'get_unit_media',
+                         'update_lead_profile', 'track_property_interest', 'get_available_visit_slots',
+                         'select_visit_time', 'book_onsite_visit', 'reschedule_onsite_visit'):
                 state.setdefault('tool_observations', []).append({
                     'tool': _name,
                     'status': 'rejected' if isinstance(outcome, dict) and outcome.get('error') else 'executed',
