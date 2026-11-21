@@ -55,7 +55,7 @@ def test_team_assignments_and_availability_scope():
         assert ex['user_id'] in staff and ex['kind'] in ('unavailable','extra_availability')
     assert pol['project_id']==team['project_id']
     assert pol['visit_duration_minutes']==45 and pol['buffer_after_minutes']==15
-    assert pol['slot_search_step_minutes']==30 and pol['offer_expiration_minutes']==30
+    assert pol['slot_search_step_minutes']==60 and pol['offer_expiration_minutes']==30
 
 
 def test_meeting_fixtures_reference_staff_and_known_project():
@@ -68,63 +68,89 @@ def test_meeting_fixtures_reference_staff_and_known_project():
         assert m['duration_minutes']>0
 
 
-def test_booking_saved_only_in_session_and_never_external_calendar():
-    state=domain.blank_state();offer=domain.slots(state);choice=offer['available_slots'][0]
-    domain.begin_turn(state,'Yes, book that offered visit please.')
-    booked=domain.book_visit(state,'Jamie','Park','jamie@example.test','+51999999991',
-                            choice['advisor_id'],choice['date'],choice['start_time'],offer['proposal_id'])
-    assert booked['ok'] is True
-    meeting=state['bp_episode']['meetings'][0]
+def _first_pending_meeting(state):
+    from datetime import timedelta
+    from app import scheduling
+    domain.begin_turn(state, 'I want to visit H-201 on Monday.')
+    domain.track_property_interest(state, 'H-201', 'interested')
+    day = scheduling.local_now().date() + timedelta(days=1)
+    if day.weekday() == 6:
+        day += timedelta(days=1)
+    offer = domain.slots(state, day.isoformat())
+    assert offer['ok'], offer
+    choice = offer['available_slots'][0]
+    domain.begin_turn(state, f'I choose {choice["start_time"]} for H-201.')
+    assert domain.select_visit_time(state, offer['proposal_id'], choice['date'], choice['start_time'])['ok']
+    domain.begin_turn(state, 'Yes, book that offered visit please.')
+    result = domain.book_visit(state, 'Jamie', 'Park', 'jamie@example.test', '+51999999991',
+                               date_str=choice['date'], start_time=choice['start_time'],
+                               proposal_id=offer['proposal_id'], unit_id='H-201')
+    assert result['ok'] and result['pending_commit']
+    return result, choice
+
+
+def test_booking_saved_only_after_commit_and_never_external_calendar():
+    state = domain.blank_state()
+    result, choice = _first_pending_meeting(state)
+    meeting = state['bp_episode']['meetings'][0]
     assert meeting['meeting_time'].endswith('Z')
-    assert datetime.fromisoformat(meeting['meeting_time'].replace('Z','+00:00')).tzinfo==timezone.utc
+    assert datetime.fromisoformat(meeting['meeting_time'].replace('Z','+00:00')).tzinfo == timezone.utc
     assert meeting['gcal_event_id'] is None
-    assert state['bp_episode']['sales_booking_operations'][0]['calendar_status']=='simulation'
-    assert domain.blank_state()['bp_episode']['meetings']==[]
-
-
-def _first_confirmed_meeting(state):
-    offer=domain.slots(state)
-    choice=offer['available_slots'][0]
-    domain.begin_turn(state,'Yes please book this appointment.')
-    result=domain.book_visit(state,'Jamie','Park','jamie@example.test','+51999999991',
-                             choice['advisor_id'],choice['date'],choice['start_time'],offer['proposal_id'])
-    assert result['ok']
-    domain.end_turn(state,'Your DEMO visit has been confirmed.')
-    return result['meeting']['id']
+    assert meeting['status'] == 'pending_assignment'
+    assert meeting['assigned_sales_user_id'] is None
+    assert state['bp_episode']['sales_booking_operations'][0]['calendar_status'] == 'simulation'
+    assert domain.blank_state()['bp_episode']['meetings'] == []
 
 
 def test_cancellation_is_evidenced_and_preserves_operation_history():
-    state=domain.blank_state();mid=_first_confirmed_meeting(state)
-    domain.begin_turn(state,'I want to cancel my visit, please.')
-    result=domain.cancel_visit(state,mid,reason='Changed my plans')
-    assert result['ok']
-    assert state['bp_episode']['meetings'][0]['status']=='cancelled'
-    op=state['bp_episode']['sales_cancellation_operations'][0]
-    assert op['meeting_id']==mid
-    assert op['reason_message_id']==state['_active_source_message_id']
-    assert op['calendar_status']=='simulation'
-    assert 'error' in domain.cancel_visit(state,mid)
+    state = domain.blank_state()
+    result, choice = _first_pending_meeting(state)
+    mid = state['bp_episode']['meetings'][0]['id']
+    # The real persistence transition to confirmed is covered in v8 DB tests;
+    # this legacy domain-unit test starts from a committed fixture state.
+    state['bp_episode']['meetings'][0]['status'] = 'confirmed'
+    state['booked_visits'][0]['status'] = 'confirmed'
+    domain.begin_turn(state, 'I want to cancel my visit, please.')
+    response = domain.cancel_visit(state, mid, reason='Changed my plans')
+    assert response['ok']
+    assert state['bp_episode']['meetings'][0]['status'] == 'cancelled'
+    op = state['bp_episode']['sales_cancellation_operations'][0]
+    assert op['meeting_id'] == mid
+    assert op['reason_message_id'] == state['_active_source_message_id']
+    assert op['calendar_status'] == 'simulation'
+    assert 'error' in domain.cancel_visit(state, mid)
 
 
-def test_reschedule_preserves_original_and_creates_replacement():
-    state=domain.blank_state();mid=_first_confirmed_meeting(state)
-    fresh=domain.slots(state)
-    # Because offers are sorted and advisor global occupancy is checked, at
-    # least one different start remains after the first visit.
-    next_slot=fresh['available_slots'][0]
-    domain.begin_turn(state,'Yes, please reschedule my visit to that offered time.')
-    res=domain.reschedule_visit(state,mid,'Jamie','Park','jamie@example.test','+51999999991',
-                                next_slot['advisor_id'],next_slot['date'],next_slot['start_time'],fresh['proposal_id'])
-    assert res['ok']
-    original,replacement=state['bp_episode']['meetings']
-    assert original['id']==mid and original['status']=='cancelled'
-    assert original['confirmation_status']=='rescheduled'
-    assert replacement['status']=='confirmed' and replacement['id']!=mid
-    assert len(state['bp_episode']['sales_booking_operations'])==2
-    op=state['bp_episode']['sales_reschedule_operations'][0]
-    assert op['original_meeting_id']==mid
-    assert op['replacement_meeting_id']==replacement['id']
-    assert op['calendar_status']=='simulation'
+def test_reschedule_preserves_original_and_creates_pending_replacement():
+    from datetime import timedelta
+    from app import scheduling
+    state = domain.blank_state()
+    result, choice = _first_pending_meeting(state)
+    mid = state['bp_episode']['meetings'][0]['id']
+    state['bp_episode']['meetings'][0]['status'] = 'confirmed'
+    state['booked_visits'][0]['status'] = 'confirmed'
+    day = scheduling.local_now().date() + timedelta(days=2)
+    if day.weekday() == 6:
+        day += timedelta(days=1)
+    fresh = domain.slots(state, day.isoformat())
+    assert fresh['ok'], fresh
+    next_slot = fresh['available_slots'][0]
+    domain.begin_turn(state, f'I choose {next_slot["start_time"]} to reschedule H-201.')
+    assert domain.select_visit_time(state, fresh['proposal_id'], next_slot['date'], next_slot['start_time'])['ok']
+    domain.begin_turn(state, 'Yes, please reschedule the H-201 visit to that offered hour.')
+    res = domain.reschedule_visit(state, mid, 'Jamie', 'Park', 'jamie@example.test', '+51999999991',
+                                  date_str=next_slot['date'], start_time=next_slot['start_time'],
+                                  proposal_id=fresh['proposal_id'], unit_id='H-201')
+    assert res['ok'], res
+    original, replacement = state['bp_episode']['meetings']
+    assert original['id'] == mid and original['status'] == 'cancelled'
+    assert original['confirmation_status'] == 'rescheduled'
+    assert replacement['status'] == 'pending_assignment' and replacement['id'] != mid
+    assert len(state['bp_episode']['sales_booking_operations']) == 2
+    op = state['bp_episode']['sales_reschedule_operations'][0]
+    assert op['original_meeting_id'] == mid
+    assert op['replacement_meeting_id'] == replacement['id']
+    assert op['calendar_status'] == 'simulation'
 
 
 def test_typed_feature_search_respects_model_and_inventory():

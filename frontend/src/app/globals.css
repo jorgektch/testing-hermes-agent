@@ -27,3 +27,18 @@
 .profile-preview-note{font-size:10px;color:#ddb877;border:1px solid #755b2b;padding:9px;border-radius:5px;margin-top:13px}
 
 .message-provisional .message-content{border-style:dashed;opacity:.85}
+/* v8: compact SMS inspection, one-click export, and selected house context */
+.chat-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.chat-actions .ghost{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+.message-copy{margin-left:6px;display:inline-flex;align-items:center;gap:4px;background:transparent;border:1px solid transparent;border-radius:4px;color:#b4b4b4;font-size:9px;cursor:pointer;padding:3px 5px;flex-shrink:0}
+.message-copy:hover,.message-copy:focus-visible{border-color:var(--line);color:#fff;background:#222}
+.message-meta time{margin-left:auto}
+.sms-indicator{font-size:9px;color:#8b8b8b;margin-top:5px;text-align:right;letter-spacing:.01em}
+.export-inline{display:flex;align-items:center;gap:6px;margin:10px 0;background:#242424;border:1px solid var(--line);color:var(--ink);border-radius:4px;font-size:10px;padding:8px;cursor:pointer}
+.focus-location{display:flex;align-items:flex-start;gap:7px;color:#bcbcbc;margin-top:10px;font-size:10px;line-height:1.5}
+.focus-location svg{flex-shrink:0;margin-top:2px}
+.focus-location small{display:block;color:var(--sub);font-size:9px}
+.storage-diagnostics{display:flex;flex-direction:column;gap:4px;font-size:10px;color:var(--sub);overflow-wrap:anywhere}
+
+/* v8: align calendar grid with whole-hour visit starts. Legacy :30 meetings remain positioned precisely. */
+.calendar-time-row{height:60px}

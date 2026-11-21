@@ -89,44 +89,51 @@ def test_calendar_and_admin_permanent_delete(env):
     assert admin.get(f"/api/leads/{lead['id']}").status_code==404
 
 
-def test_occupancy_conflicts_across_leads_and_deletion_releases(env):
-    c=TestClient(main.app)
-    csrf=login(c)
-    first=add_lead(c,csrf,'Alice')
-    second=add_lead(c,csrf,'Bob')
-    auth=db.session_lookup(c.cookies.get(main.COOKIE))
+def test_round_robin_across_leads_and_deletion_releases(env):
+    from datetime import timedelta
+    from app import scheduling
+    c = TestClient(main.app)
+    csrf = login(c)
+    auth = db.session_lookup(c.cookies.get(main.COOKIE))
     assert auth
-    s1=first['state'];s2=second['state']
-    # Both users offered the identical slot before either confirms.
-    domain.begin_turn(s1,'Show slots for a visit')
-    offer1=domain.slots(s1,extra_occupied=db.occupied_by_advisor())
-    domain.end_turn(s1,'Here are a few options.')
-    domain.begin_turn(s2,'Show slots for a visit')
-    offer2=domain.slots(s2,extra_occupied=db.occupied_by_advisor())
-    domain.end_turn(s2,'Here are a few options.')
-    option=offer1['available_slots'][0]
-    assert option in offer2['available_slots']
-    db.save_turn(auth,first['id'],0,s1,[],'Show slots for a visit','Here are a few options.')
-    db.save_turn(auth,second['id'],0,s2,[],'Show slots for a visit','Here are a few options.')
-    for s,lead,offer,rev in [(s1,first,offer1,1),(s2,second,offer2,1)]:
-        domain.begin_turn(s,'Yes, please book that visit.')
-        result=domain.book_visit(s,lead['first_name'],lead['last_name'],lead['email'],lead['phone'],
-                   option['advisor_id'],option['date'],option['start_time'],offer['proposal_id'])
-        assert result['ok'] is True
-        domain.end_turn(s,'Booked in the simulation.')
-    db.save_turn(auth,first['id'],1,s1,[],'Yes, please book that visit.','Booked in the simulation.')
-    with pytest.raises(db.Conflict):
-        db.save_turn(auth,second['id'],1,s2,[],'Yes, please book that visit.','Booked in the simulation.')
-    active=db.occupied_by_advisor()
-    assert active.get(option['sales_user_id'])
-    assert db.delete_lead(auth,first['id'])
-    # The same slot is available again after the lead and its booking are purged.
-    other=db.lead_get(auth,second['id'])
-    fresh=domain.slots(other['state'],extra_occupied=db.occupied_by_advisor())
-    assert option in fresh['available_slots']
+    date = scheduling.local_now().date() + timedelta(days=1)
+    while date.weekday() == 6:
+        date += timedelta(days=1)
+    bookings = []
+    for first_name in ('Alice','Bob'):
+        lead = add_lead(c, csrf, first_name)
+        state = lead['state']
+        domain.begin_turn(state, 'I would like to visit house H-201')
+        domain.track_property_interest(state, 'H-201', 'interested')
+        offer = domain.slots(state, date.isoformat(), extra_occupied=db.occupied_by_advisor())
+        assert offer['ok']
+        assert not any('advisor' in str(x).lower() for x in offer['available_slots'])
+        domain.end_turn(state, 'Here are some hours')
+        lead = db.save_turn(auth,lead['id'],0,state,[],'I would like to visit house H-201','Here are some hours')
+        slot = offer['available_slots'][0]
+        chosen_text = f'I choose {slot["start_time"]} for my H-201 visit'
+        domain.begin_turn(state, chosen_text)
+        assert domain.select_visit_time(state, offer['proposal_id'], slot['date'], slot['start_time'])['ok']
+        domain.end_turn(state, 'Please confirm this time.')
+        db.save_turn(auth,lead['id'],1,state,[],chosen_text,'Please confirm this time.')
+        domain.begin_turn(state, 'Yes, please confirm that hour.')
+        booked = domain.book_visit(state, first_name,'Demo',lead['email'],lead['phone'],
+                         date_str=slot['date'],start_time=slot['start_time'],
+                         proposal_id=offer['proposal_id'],unit_id='H-201',
+                         extra_occupied=db.occupied_by_advisor())
+        assert booked['pending_commit']
+        domain.end_turn(state,'Pending database confirmation')
+        lead = db.save_turn(auth,lead['id'],2,state,[],'Yes, please confirm that hour.','Pending database confirmation')
+        bookings.append((lead,lead['state']['booked_visits'][0],slot))
+    assert bookings[0][1]['advisor_id'] != bookings[1][1]['advisor_id']
+    assert bookings[0][1]['unit_id'] == bookings[1][1]['unit_id'] == 'H-201'
+    for lead, booking, slot in bookings:
+        assert booking['status'] == 'confirmed'
+        assert booking['advisor_name'] in lead['messages'][-1]['content'] or booking['advisor_name'] in ''.join(x['content'] for x in lead['messages'][-2:])
+    assert db.delete_lead(auth, bookings[0][0]['id'])
     with db.database() as con:
-        for table in ['leads','conversations','lead_facts','property_interests','meetings']:
-            assert con.execute(f"SELECT COUNT(*) FROM {table} WHERE lead_id=?" if table!='leads' else 'SELECT COUNT(*) FROM leads WHERE id=?', (first['id'],)).fetchone()[0]==0
+        assert con.execute('SELECT COUNT(*) FROM meetings WHERE lead_id=?',(bookings[0][0]['id'],)).fetchone()[0] == 0
+        assert con.execute('SELECT COUNT(*) FROM meeting_occupancy WHERE meeting_id=?',(bookings[0][1]['meeting_id'],)).fetchone()[0] == 0
 
 
 def test_fixture_dates_stay_absolute_across_reads(env):
@@ -165,37 +172,51 @@ def test_fact_evidence_references_persisted_inbound_message(env,monkeypatch):
 
 
 def test_booking_calendar_shared_between_admin_sessions(env):
-    admin=TestClient(main.app)
-    visitor=TestClient(main.app)
-    acsrf=login(admin)
+    from datetime import timedelta
+    from app import scheduling
+    admin = TestClient(main.app)
+    visitor = TestClient(main.app)
+    acsrf = login(admin)
     login(visitor)
-    lead=add_lead(admin,acsrf,'Private')
-    auth=db.session_lookup(admin.cookies.get(main.COOKIE))
-    state=lead['state']
-    domain.begin_turn(state,'Show me slots')
-    offer=domain.slots(state,extra_occupied=db.occupied_by_advisor())
-    domain.end_turn(state,'Here are some times')
-    db.save_turn(auth,lead['id'],0,state,[],'Show me slots','Here are some times')
-    slot=offer['available_slots'][0]
+    lead = add_lead(admin,acsrf,'Private')
+    auth = db.session_lookup(admin.cookies.get(main.COOKIE))
+    state = lead['state']
+    day = scheduling.local_now().date() + timedelta(days=1)
+    while day.weekday() == 6:
+        day += timedelta(days=1)
+    domain.begin_turn(state, 'I want H-101')
+    domain.track_property_interest(state, 'H-101', 'interested')
+    offer = domain.slots(state, day.isoformat(), extra_occupied=db.occupied_by_advisor())
+    assert offer['ok'], offer
+    domain.end_turn(state, 'Here are some times')
+    db.save_turn(auth,lead['id'],0,state,[],'I want H-101','Here are some times')
+    slot = offer['available_slots'][0]
+    chosen_text = f'I choose {slot["start_time"]} for H-101'
+    domain.begin_turn(state, chosen_text)
+    assert domain.select_visit_time(state, offer['proposal_id'], slot['date'], slot['start_time'])['ok']
+    domain.end_turn(state, 'Please confirm')
+    db.save_turn(auth,lead['id'],1,state,[],chosen_text,'Please confirm')
     domain.begin_turn(state,'Yes, book that offered time, please')
-    booked=domain.book_visit(state,'Private','Demo',lead['email'],lead['phone'],
-                              slot['advisor_id'],slot['date'],slot['start_time'],offer['proposal_id'],unit_id='H-101')
+    booked = domain.book_visit(state,'Private','Demo',lead['email'],lead['phone'],
+                               date_str=slot['date'],start_time=slot['start_time'],
+                               proposal_id=offer['proposal_id'],unit_id='H-101')
     assert booked['ok']
-    domain.end_turn(state,'Your H-101 demo visit is confirmed')
-    db.save_turn(auth,lead['id'],1,state,[],'Yes, book that offered time, please','Your H-101 demo visit is confirmed')
-    params={'start':slot['date'],'days':1}
-    admin_bookings=admin.get('/api/calendar',params=params).json()['meetings']
-    visitor_bookings=visitor.get('/api/calendar',params=params).json()['meetings']
-    ours=next(x for x in admin_bookings if x['id']==booked['meeting']['id'])
-    other=next(x for x in visitor_bookings if x['id']==booked['meeting']['id'])
+    domain.end_turn(state,'Pending database confirmation')
+    result = db.save_turn(auth,lead['id'],2,state,[],'Yes, book that offered time, please','Pending database confirmation')
+    booking = result['state']['booked_visits'][0]
+    assert booking['advisor_name']
+    params = {'start':slot['date'],'days':1}
+    admin_bookings = admin.get('/api/calendar',params=params).json()['meetings']
+    visitor_bookings = visitor.get('/api/calendar',params=params).json()['meetings']
+    ours = next(x for x in admin_bookings if x['id'] == booking['meeting_id'])
+    other = next(x for x in visitor_bookings if x['id'] == booking['meeting_id'])
     assert ours['unit_id']=='H-101' and ours['first_name']=='Private'
-    # There is now one admin role: independent admin logins share lead history.
     assert other['unit_id']=='H-101' and other['first_name']=='Private'
-    before=len(visitor.get('/api/calendar',params=params).json()['slots'])
-    assert admin.delete(f"/api/admin/leads/{lead['id']}",headers={'X-Demo-Csrf':acsrf}).status_code==200
-    after_calendar=visitor.get('/api/calendar',params=params).json()
-    assert len(after_calendar['slots'])>=before
-    assert not any(x['id']==booked['meeting']['id'] for x in after_calendar['meetings'])
+    before = len(visitor.get('/api/calendar',params=params).json()['slots'])
+    assert admin.delete(f"/api/admin/leads/{lead['id']}",headers={'X-Demo-Csrf':acsrf}).status_code == 200
+    after = visitor.get('/api/calendar',params=params).json()
+    assert len(after['slots']) >= before
+    assert not any(x['id'] == booking['meeting_id'] for x in after['meetings'])
 
 
 def test_insecure_demo_credentials_require_explicit_opt_in(env, monkeypatch):

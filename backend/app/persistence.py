@@ -6,6 +6,7 @@ The UI never supplies executable Hermes history or meeting details.
 from __future__ import annotations
 
 import contextlib
+import copy
 import hashlib
 import hmac
 import json
@@ -56,12 +57,28 @@ def _db_path() -> str:
     return url
 
 
+def _remote_credentials() -> tuple[str, str]:
+    """Use an explicitly pinned production DB if BOTH credentials are set.
+
+    Marketplace variables remain the default for deployments where no pinned
+    connection is configured. Never combine a token from one source with a URL
+    from the other source; that is a common cause of 401 responses.
+    """
+    pinned_url = os.environ.get('DEMO_PERSISTENT_TURSO_URL', '').strip()
+    pinned_token = os.environ.get('DEMO_PERSISTENT_TURSO_TOKEN', '').strip()
+    if bool(pinned_url) != bool(pinned_token):
+        raise RuntimeError('Set BOTH DEMO_PERSISTENT_TURSO_URL and DEMO_PERSISTENT_TURSO_TOKEN, or neither.')
+    if pinned_url:
+        return pinned_url, pinned_token
+    return (os.environ.get('TURSO_DATABASE_URL', '').strip(),
+            os.environ.get('TURSO_DATABASE_TURSO_AUTH_TOKEN', '').strip())
+
+
 def connect():
-    remote = os.environ.get('TURSO_DATABASE_URL', '').strip()
+    remote, token = _remote_credentials()
     if remote:
-        token = os.environ.get('TURSO_DATABASE_TURSO_AUTH_TOKEN', '').strip()
         if not token:
-            raise RuntimeError('TURSO_AUTH_TOKEN is required with TURSO_DATABASE_URL')
+            raise RuntimeError('The Turso URL requires its matching authentication token.')
         import libsql  # installed with backend/requirements.txt; never put token in the URL
         con = libsql.connect(database=remote, auth_token=token)
     else:
@@ -132,6 +149,8 @@ SCHEMA = [
         meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
         PRIMARY KEY(advisor_id, bucket_utc))''',
     '''CREATE INDEX IF NOT EXISTS idx_occupancy_meeting ON meeting_occupancy(meeting_id)''',
+    '''CREATE TABLE IF NOT EXISTS advisor_rotation (
+        project_id TEXT PRIMARY KEY, next_index INTEGER NOT NULL DEFAULT 0)''',
 ]
 
 
@@ -201,7 +220,8 @@ def _next_message_sequence(con, conversation_id: str) -> int:
 
 
 def initialize():
-    key = os.getenv('TURSO_DATABASE_URL') or _db_path()
+    remote, _ = _remote_credentials()
+    key = remote or _db_path()
     if key in _INITIALIZED:
         return
     with _INIT_LOCK:
@@ -317,7 +337,9 @@ def create_lead(auth: dict, first_name: str, last_name: str, email: str, phone: 
     lead_id=state['bp_episode']['ids']['lead_id']
     conv_id=state['bp_episode']['ids']['conversation_id']
     project_id=state['bp_episode']['ids']['project_id']
-    greeting=f"Hi {first_name}! I'm the AI Sales Agent assigned to help you with your home search at Residencial Jardines del Sol. What kind of house are you looking for, and what budget are you considering?"
+    greeting=f"Hi {first_name}! I'm the AI Sales Agent assigned to help you at Residencial Jardines del Sol. What kind of house and budget do you have in mind?"
+    from .sms import outgoing_segments
+    initial_sms = outgoing_segments(greeting)
     message_id=str(uuid.uuid4())
     state['bp_episode']['sales_messages']=[]
     with database() as con:
@@ -327,9 +349,10 @@ def create_lead(auth: dict, first_name: str, last_name: str, email: str, phone: 
         con.execute('''INSERT INTO conversations(id,lead_id,state_json,created_at,updated_at)
                        VALUES(?,?,?,?,?)''',
                     (conv_id,lead_id,json.dumps(state,ensure_ascii=False),iso(),iso()))
-        con.execute('''INSERT INTO messages(id,conversation_id,role,content,created_at,sequence_number)
-                       VALUES(?,?,?,?,?,?)''',
-                    (message_id,conv_id,'assistant',greeting,iso(),1))
+        for index, segment in enumerate(initial_sms, 1):
+            con.execute('''INSERT INTO messages(id,conversation_id,role,content,created_at,sequence_number)
+                           VALUES(?,?,?,?,?,?)''',
+                        (message_id if index == 1 else str(uuid.uuid4()),conv_id,'assistant',segment,iso(),index))
     return lead_get(auth, lead_id)
 
 
@@ -354,24 +377,118 @@ def _booking_rows(state: dict, lead_id: str, conversation_id: str) -> list[dict]
     return rows
 
 
-def _sync_meetings(con, state: dict, lead_id: str, conversation_id: str):
-    existing=_rows(con.execute('SELECT id,status FROM meetings WHERE lead_id=?',(lead_id,)))
-    prev={row['id']:row['status'] for row in existing}
-    incoming=_booking_rows(state,lead_id,conversation_id)
-    # Release cancelled/rescheduled occupancy BEFORE allocating new intervals.
-    for row in incoming:
-        if row['id'] in prev and row['status'] not in ACTIVE:
-            con.execute('DELETE FROM meeting_occupancy WHERE meeting_id=?',(row['id'],))
-            con.execute('UPDATE meetings SET status=? WHERE id=?',(row['status'],row['id']))
-    for row in incoming:
-        if row['id'] in prev:continue
-        con.execute('''INSERT INTO meetings
+def _transaction_occupancy(con) -> dict:
+    """Occupancy from the authoritative transaction, including all projects."""
+    rows = _rows(con.execute("""SELECT advisor_id,starts_at,occupied_until FROM meetings
+        WHERE status IN ('scheduled','confirmed','in_progress')"""))
+    result = {}
+    for item in rows:
+        result.setdefault(item['advisor_id'], []).append(
+            (as_dt(item['starts_at']), as_dt(item['occupied_until'])))
+    return result
+
+
+def _assign_round_robin(con, state: dict, row: dict) -> dict:
+    """Choose the next available advisor and reserve capacity in the same transaction.
+
+    Nobody (including Hermes) receives an advisor name until save_turn commits.
+    Unique occupancy buckets prevent a double-booking if two workers race.
+    """
+    from . import scheduling
+    project_id = state['bp_episode']['ids']['project_id']
+    users = scheduling.eligible_users(project_id)
+    if not users:
+        raise Conflict('No physical sales advisors are available for this project.')
+    day = as_dt(row['starts_at']).astimezone(scheduling.TZ).date()
+    hour = as_dt(row['starts_at']).astimezone(scheduling.TZ).strftime('%H:%M')
+    choices = scheduling.available_slots(state, date_filter=day,
+                    extra_occupied=_transaction_occupancy(con))
+    available = {s['sales_user_id'] for s in choices
+                 if s['date'] == day.isoformat() and s['start_time'] == hour}
+    if not available:
+        raise Conflict('Selected hour is no longer available. Request new availability.')
+    # The first v8 allocation continues after the most recently assigned
+    # historical Hermes appointment, so a deployment upgrade does not reset
+    # distribution back to the first salesperson.
+    previous = _one(con.execute('''SELECT advisor_id FROM meetings
+        WHERE source='hermes_agent' AND advisor_id IS NOT NULL
+        ORDER BY created_at DESC,id DESC LIMIT 1'''))
+    previous_index = next((i for i,u in enumerate(users)
+                           if previous and u['id'] == previous['advisor_id']), None)
+    initial_cursor = ((previous_index + 1) % len(users)) if previous_index is not None else 0
+    con.execute('INSERT OR IGNORE INTO advisor_rotation(project_id,next_index) VALUES (?,?)',
+                (project_id, initial_cursor))
+    cursor = _one(con.execute('SELECT next_index FROM advisor_rotation WHERE project_id=?', (project_id,)))['next_index']
+    for distance in range(len(users)):
+        index = (cursor + distance) % len(users)
+        user = users[index]
+        if user['id'] not in available:
+            continue
+        row['advisor_id'] = user['id']
+        row['status'] = 'confirmed'
+        con.execute("""INSERT INTO meetings
           (id,lead_id,conversation_id,advisor_id,unit_id,starts_at,ends_at,occupied_until,status,replacement_of,source,created_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''', _meeting_params(row))
-        if row['status'] in ACTIVE:
-            try:_reserve(con,row)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""", _meeting_params(row))
+        try:
+            _reserve(con, row)
+        except Exception:
+            # Undo failed candidate's partial occupancy before retrying another.
+            con.execute('DELETE FROM meeting_occupancy WHERE meeting_id=?', (row['id'],))
+            con.execute('DELETE FROM meetings WHERE id=?', (row['id'],))
+            continue
+        move = con.execute('UPDATE advisor_rotation SET next_index=? WHERE project_id=? AND next_index=?',
+                           ((index+1) % len(users), project_id, cursor))
+        if move.rowcount != 1:
+            raise Conflict('The advisor assignment changed concurrently. Retry the booking.')
+        booking = next(b for b in state['booked_visits'] if b['meeting_id'] == row['id'])
+        booking.update(status='confirmed', advisor_id=user['demo_advisor_id'],
+                       advisor_name=user['display_name'])
+        meeting = next(m for m in state['bp_episode']['meetings'] if m['id'] == row['id'])
+        meeting.update(status='confirmed', confirmation_status='confirmed',
+                       assigned_sales_user_id=user['id'])
+        for operation in state['bp_episode'].get('sales_booking_operations', []):
+            if operation['meeting_id'] == row['id']:
+                operation['snapshot_json']['option']['sales_user_id'] = user['id']
+        if state.get('booking_proposal', {}).get('meeting_id') == row['id']:
+            state['booking_proposal']['status'] = 'confirmed'
+        state['stage'] = 'Visit booked · simulated'
+        state['bp_episode']['leads']['funnel_stage'] = 'appointment_set'
+        state['bp_episode']['leads']['pipeline_stage'] = 'S04_APPOINTMENT'
+        state.setdefault('events', []).append({
+            'id': str(uuid.uuid4())[:8], 'event': 'booking',
+            'label': f'Confirmed demo visit {booking["date"]} at {booking["start_time"]} · {user["display_name"]}',
+            'timestamp': iso(),
+        })
+        return booking
+    raise Conflict('All physical sales advisors became unavailable for that hour.')
+
+
+def _sync_meetings(con, state: dict, lead_id: str, conversation_id: str) -> dict | None:
+    existing = _rows(con.execute('SELECT id,status FROM meetings WHERE lead_id=?', (lead_id,)))
+    prev = {item['id']: item['status'] for item in existing}
+    incoming = _booking_rows(state, lead_id, conversation_id)
+    for item in incoming:
+        if item['id'] in prev and item['status'] not in ACTIVE:
+            con.execute('DELETE FROM meeting_occupancy WHERE meeting_id=?', (item['id'],))
+            con.execute('UPDATE meetings SET status=? WHERE id=?', (item['status'], item['id']))
+    confirmed = None
+    for item in incoming:
+        if item['id'] in prev:
+            continue
+        if item['status'] == 'pending_assignment':
+            if not item['unit_id']:
+                raise Conflict('A visit cannot be confirmed without a selected house.')
+            confirmed = _assign_round_robin(con, state, item)
+            continue
+        con.execute("""INSERT INTO meetings
+          (id,lead_id,conversation_id,advisor_id,unit_id,starts_at,ends_at,occupied_until,status,replacement_of,source,created_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""", _meeting_params(item))
+        if item['status'] in ACTIVE:
+            try:
+                _reserve(con, item)
             except Exception as exc:
-                raise Conflict('Selected advisor time was just booked in another session. Ask Hermes for new availability.') from exc
+                raise Conflict('Selected advisor time was just booked in another session.') from exc
+    return confirmed
 
 
 def save_turn(auth: dict, lead_id: str, old_revision: int, state: dict,
@@ -379,6 +496,7 @@ def save_turn(auth: dict, lead_id: str, old_revision: int, state: dict,
     """Atomic state, messages and cross-lead appointment collision check."""
     where,args=_visibility(auth['role'],auth['owner_id'])
     conv_id=state['bp_episode']['ids']['conversation_id']
+    from .sms import outgoing_segments
     new_state=dict(state)
     new_state['bp_episode']=dict(state['bp_episode'])
     # Messages are persisted separately. Keep the Hermes continuation ONLY in hermes_history_json.
@@ -388,10 +506,23 @@ def save_turn(auth: dict, lead_id: str, old_revision: int, state: dict,
                          WHERE l.id=? AND c.id=?'''+where,(lead_id,conv_id,*args)))
         if not old or old['revision'] != old_revision:
             raise Conflict('This lead conversation changed in another tab. Reload and retry.')
-        _sync_meetings(con,state,lead_id,conv_id)
+        booked = _sync_meetings(con,state,lead_id,conv_id)
+        if booked:
+            # The final human advisor is known only after successful allocation.
+            assistant_reply = (f'Demo visit confirmed: {booked["unit_id"]} on '
+                f'{booked["date"]} at {booked["start_time"]} (Lima). '
+                f'Advisor: {booked["advisor_name"]}. The visit lasts 45 minutes. '
+                'Location is fictional; no real appointment was created.')
+            state['bp_episode']['sales_messages'][-1]['content'] = assistant_reply
+        sms_segments = outgoing_segments(assistant_reply)
+        history_copy = copy.deepcopy(hermes_history)
+        for item in reversed(history_copy):
+            if item.get('role') == 'assistant' and isinstance(item.get('content'), str):
+                item['content'] = '\n'.join(sms_segments)
+                break
         cur=con.execute('''UPDATE conversations SET revision=revision+1,state_json=?,hermes_history_json=?,updated_at=?
                              WHERE id=? AND revision=?''',
-                        (json.dumps(new_state,ensure_ascii=False),json.dumps(hermes_history,ensure_ascii=False),iso(),conv_id,old_revision))
+                        (json.dumps(new_state,ensure_ascii=False),json.dumps(history_copy,ensure_ascii=False),iso(),conv_id,old_revision))
         if cur.rowcount != 1:raise Conflict('Concurrent conversation update detected.')
         # Contact edits explicitly captured by Hermes also update the master
         # lead row; do not leave an old phone/email visible in the sidebar.
@@ -407,10 +538,15 @@ def save_turn(auth: dict, lead_id: str, old_revision: int, state: dict,
                 or turn_messages[0]['content']!=user_message or turn_messages[1]['content']!=assistant_reply):
             raise Conflict('Conversation evidence does not match the messages being saved.')
         next_sequence = _next_message_sequence(con, conv_id)
-        for offset, msg in enumerate(turn_messages):
+        inbound, outbound = turn_messages
+        messages_to_save = [(inbound['id'], 'user', user_message, inbound['created_at'])]
+        messages_to_save += [(
+            outbound['id'] if index == 0 else str(uuid.uuid4()), 'assistant', segment,
+            outbound['created_at']) for index, segment in enumerate(sms_segments)]
+        for offset, (mid, role, content, created_at) in enumerate(messages_to_save):
             con.execute('''INSERT INTO messages(id,conversation_id,role,content,created_at,sequence_number)
                            VALUES(?,?,?,?,?,?)''',
-                        (msg['id'],conv_id,msg['role'],msg['content'],iso(as_dt(msg['created_at'])),next_sequence+offset))
+                        (mid,conv_id,role,content,iso(as_dt(created_at)),next_sequence+offset))
         sales=state['bp_episode']['leads']['lead_profile_data']['sales_profile']
         facts=list(sales['current'].values())+sales.get('history',[])
         for fact in facts:
@@ -425,7 +561,9 @@ def save_turn(auth: dict, lead_id: str, old_revision: int, state: dict,
         if proposal:
             con.execute('''INSERT OR REPLACE INTO appointment_offers(id,conversation_id,payload_json,status,expires_at)
                          VALUES(?,?,?,?,?)''',(proposal['proposal_id'],conv_id,json.dumps(proposal),proposal['status'],proposal['expires_at']))
-    return lead_get(auth,lead_id)
+    result = lead_get(auth, lead_id)
+    result['last_assistant_reply'] = '\n'.join(sms_segments)
+    return result
 
 
 def occupied_by_advisor() -> dict[str,list[tuple[datetime,datetime]]]:
@@ -476,3 +614,17 @@ def delete_lead(auth: dict, lead_id: str) -> bool:
         # Deleting owner-specific sessions also revokes open evaluator browser tabs.
         # Admin sessions remain available for deleting other leads.
     return True
+
+
+def storage_diagnostics() -> dict:
+    """Administrator-visible store identity and counts; no credentials or PII."""
+    remote, _ = _remote_credentials()
+    source = remote or _db_path()
+    with database() as con:
+        counts = {name: _one(con.execute(f'SELECT COUNT(*) AS count FROM {name}'))['count']
+                  for name in ('leads', 'conversations', 'messages', 'meetings')}
+    return {'mode': 'turso' if remote else 'sqlite',
+            'database_fingerprint': hashlib.sha256(source.encode()).hexdigest()[:16],
+            'counts': counts, 'environment': 'production' if os.environ.get('VERCEL_ENV') == 'production' else
+                ('preview' if os.environ.get('VERCEL_ENV') == 'preview' else 'local'),
+            'note': 'A deployment does not delete records. Compare this fingerprint between deployments.'}

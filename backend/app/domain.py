@@ -409,36 +409,107 @@ def date_input(raw: str | None) -> str | None:
 
 
 def slots(state: dict, date_str: str | None = None, *, extra_occupied: dict | None = None) -> dict:
-    """Publish three expiring options from a fresh calculation (NOT a hold).
+    """Offer a specific day's hourly starts, never advisor identities.
 
-    Offer = client-visible proposal evidence, NOT a meeting. A confirmed
-    booking requires another lead message, proposal ID and slot revalidation.
+    The lead first explicitly selects a house, then a date. The tool result is
+    safe to show to a buyer; no advisor is assigned before final confirmation.
     """
+    unit_id = state['lead'].get('interest_unit_id')
+    if not unit_id or unit_id not in {u['unit_id'] for u in read_catalog()['properties']}:
+        return {'error': 'Ask the lead to choose one specific available house before proposing an onsite visit.'}
+    if not date_str:
+        return {'error': 'Ask the lead for a specific visit day before searching for hourly start times.'}
     try:
-        day_str=date_input(date_str)
-        day=date.fromisoformat(day_str) if day_str else None
+        day_str = date_input(date_str)
+        day = date.fromisoformat(day_str)
     except ValueError as exc:
-        return {'error':str(exc)}
-    policy=scheduling.policy()
-    options=scheduling.pick_diverse_slots(scheduling.available_slots(state,date_filter=day,extra_occupied=extra_occupied),
-                                         policy['maximum_offered_options'])
-    proposal_id=str(uuid.uuid4())
-    expires_at=(datetime.now(timezone.utc)+timedelta(minutes=policy['offer_expiration_minutes'])).isoformat()
-    proposal={'version':'hermes-demo/booking-proposal/1.0',
-              'proposal_id':proposal_id,'status':'offered','options':options,
-              'offer_source_message_id':state.get('_active_source_message_id'),
-              'expires_at':expires_at,'timezone':policy['timezone']}
-    state['booking_proposal']=proposal
-    dialogue=state['bp_episode']['sales_dialogue_states']['state_json']
-    dialogue['booking_search']={'requested_date':day_str,'timezone':policy['timezone']}
-    dialogue['booking_proposal']=copy.deepcopy(proposal) if options else None
-    state['bp_episode']['sales_dialogue_states']['revision']+=1
-    record(state,'slot_offer',f'{len(options)} demo visit options · expires in {policy["offer_expiration_minutes"]} minutes')
-    return {'ok':True,'available_slots':options,'proposal_id':proposal_id,
-            'expires_at':expires_at,'timezone':policy['timezone'],
-            'visit_duration_minutes':policy['visit_duration_minutes'],
-            'buffer_minutes':policy['buffer_after_minutes'],
-            'notice':'Proposed times are NOT held. They expire and must be rechecked. No external calendar is connected.'}
+        return {'error': str(exc)}
+    previous = state.get('booking_proposal')
+    if (previous and previous.get('status') == 'offered' and
+            previous.get('selected_unit_id') == unit_id and previous.get('date') == day_str and
+            datetime.now(timezone.utc) < datetime.fromisoformat(previous['expires_at'].replace('Z', '+00:00'))):
+        return {'ok': True, 'available_slots': previous['options'],
+                'time_ranges': scheduling.time_ranges(previous['options']),
+                'proposal_id': previous['proposal_id'], 'expires_at': previous['expires_at'],
+                'timezone': scheduling.policy()['timezone'],
+                'note': 'Existing offer, not held. No advisor is assigned.'}
+    pol = scheduling.policy()
+    choices = scheduling.available_slots(state, date_filter=day, extra_occupied=extra_occupied)
+    # Offer the date's full range, not just three advisor-specific alternatives.
+    options = scheduling.public_start_times(choices)
+    proposal_id = str(uuid.uuid4())
+    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=pol['offer_expiration_minutes'])).isoformat()
+    proposal = {'version': 'hermes-demo/booking-proposal/2.0', 'proposal_id': proposal_id,
+                'status': 'offered', 'selected_unit_id': unit_id, 'date': day_str,
+                'options': options, 'offer_source_message_id': state.get('_active_source_message_id'),
+                'expires_at': expires_at, 'timezone': pol['timezone']}
+    state['booking_proposal'] = proposal
+    dialogue = state['bp_episode']['sales_dialogue_states']['state_json']
+    dialogue['booking_search'] = {'requested_date': day_str, 'timezone': pol['timezone']}
+    dialogue['booking_proposal'] = copy.deepcopy(proposal) if options else None
+    state['bp_episode']['sales_dialogue_states']['revision'] += 1
+    record(state, 'slot_offer', f'{len(options)} hourly start times offered for {unit_id} on {day_str}')
+    return {'ok': True, 'unit_id': unit_id, 'date': day_str, 'available_slots': options,
+            'time_ranges': scheduling.time_ranges(options), 'proposal_id': proposal_id,
+            'expires_at': expires_at, 'timezone': pol['timezone'],
+            'visit_duration_minutes': pol['visit_duration_minutes'],
+            'buffer_minutes': pol['buffer_after_minutes'],
+            'notice': 'No advisor assigned. Options are not reserved and expire; confirm a single start time in a later lead turn.'}
+
+
+def redact_unconfirmed_advisor_names(reply: str, state: dict) -> str:
+    """Prevent leaking known human advisor names before a persisted visit.
+
+    The model may still hallucinate unknown names; this is a narrow protection
+    for the actual synthetic team and is not a replacement for conversation
+    policy or end-to-end evaluation.
+    """
+    from . import scheduling
+    confirmed = {b.get('advisor_name') for b in state.get('booked_visits', [])
+                 if b.get('status') == 'confirmed'}
+    cleaned = reply
+    for user in scheduling.eligible_users(scheduling.policy()['project_id']):
+        if user['display_name'] in confirmed:
+            continue
+        cleaned = re.sub(re.escape(user['display_name']), 'the assigned sales advisor',
+                         cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\b'+re.escape(user['demo_advisor_id'])+r'\b',
+                         'an assigned sales advisor', cleaned, flags=re.IGNORECASE)
+    return cleaned
+
+
+def select_visit_time(state: dict, proposal_id: str, date_str: str, start_time: str) -> dict:
+    """Record one exact hour chosen by the LEAD, with message provenance.
+
+    A model cannot silently pick among offered hours. The lead's current
+    message must contain the clock time, and booking requires later consent.
+    """
+    proposal = state.get('booking_proposal')
+    if not proposal or proposal.get('status') != 'offered' or proposal.get('proposal_id') != proposal_id:
+        return {'error': 'No matching active offer. Search availability again.'}
+    try:
+        parsed_time = time.fromisoformat(start_time).strftime('%H:%M')
+        parsed_day = date_input(date_str)
+        if datetime.now(timezone.utc) >= datetime.fromisoformat(proposal['expires_at'].replace('Z', '+00:00')):
+            return {'error': 'The offer expired. Search for new availability.'}
+    except (ValueError, TypeError):
+        return {'error': 'Invalid visit date or time.'}
+    if not any(slot['date'] == parsed_day and slot['start_time'] == parsed_time
+               for slot in proposal['options']):
+        return {'error': 'This hour was not offered.'}
+    spoken = str(state.get('_active_source_message_text') or '').lower()
+    hour = int(parsed_time[:2]); twelve = hour % 12 or 12
+    meridian = 'am' if hour < 12 else 'pm'
+    possible = (rf'\b0?{hour}:00\b',
+                rf'\b{twelve}(?::00)?\s*(?:{meridian}|{meridian[0]}\.m\.)\b')
+    if not spoken or not any(re.search(pattern, spoken) for pattern in possible):
+        return {'error': 'Ask the lead to explicitly choose a clock time, such as 9 AM.'}
+    proposal.update(selected_start_time=parsed_time, selected_date=parsed_day,
+                    selected_source_message_id=state.get('_active_source_message_id'))
+    record(state, 'hour_selected', f'Lead chose {parsed_day} {parsed_time} for {proposal["selected_unit_id"]}')
+    return {'ok': True, 'date': parsed_day, 'start_time': parsed_time,
+            'unit_id': proposal['selected_unit_id'],
+            'notice': 'Hour chosen but NOT booked. Ask for explicit confirmation in a later lead message.'}
 
 
 def track_property_interest(state: dict, unit_id: str, status: str = 'discussed') -> dict:
@@ -448,6 +519,11 @@ def track_property_interest(state: dict, unit_id: str, status: str = 'discussed'
         return {'error': 'Unknown or non-public residential unit.'}
     if status not in ('discussed', 'considering', 'interested'):
         return {'error': 'Invalid interest status.'}
+    if status == 'interested' and state.get('_active_source_message_id'):
+        spoken = str(state.get('_active_source_message_text') or '').upper()
+        prior_selected = state['lead'].get('interest_unit_id') == unit_id
+        if unit_id.upper() not in spoken and not prior_selected:
+            return {'error': 'Ask the lead to explicitly name the house code before selecting it.'}
     existing = state.setdefault('property_interests', [])
     # A mention cannot downgrade a prior explicit interest.
     rank = {'discussed': 0, 'considering': 1, 'interested': 2}
@@ -507,6 +583,9 @@ def update_lead(state: dict, **kwargs: Any) -> dict:
             choices={u['unit_id'] for u in read_catalog()['properties']}
             if value not in choices:
                 return {'error': f'Unknown available unit: {value}'}
+            if (state.get('_active_source_message_id') and value != lead.get('interest_unit_id') and
+                    str(value).upper() not in str(state.get('_active_source_message_text') or '').upper()):
+                return {'error': 'Ask the lead to explicitly name the house code before selecting it.'}
         if key == 'budget_currency':
             value=str(value).upper()
             if not re.fullmatch(r'[A-Z]{3}',value):
@@ -622,102 +701,119 @@ def _explicit_lead_confirmation(state: dict) -> bool:
 
 
 def book_visit(state: dict, first_name: str, last_name: str, email: str,
-               phone: str, advisor_id: str, date_str: str,
-               start_time: str, proposal_id: str, unit_id: str | None = None,
+               phone: str, advisor_id: str | None = None, date_str: str = '',
+               start_time: str = '', proposal_id: str = '', unit_id: str | None = None,
                replaces_meeting_id: str | None = None, extra_occupied: dict | None = None) -> dict:
-    """Confirm an offered slot with explicit user consent and immediate recheck.
+    """Validate explicit consent and prepare a booking without naming an advisor.
 
-    This stays an isolated simulation, NOT a multi-user transactional booking.
+    The shared Turso transaction chooses and reserves the advisor, atomically.
+    No pre-commit booking status or advisor name is exposed to Hermes.
     """
-    policy=scheduling.policy()
-    active=[b for b in state['booked_visits'] if b.get('status')=='confirmed']
-    if active and (len(active)!=1 or active[0]['meeting_id']!=replaces_meeting_id):
-        return {'error':'A confirmed visit already exists. Reschedule or cancel it first.'}
+    pol = scheduling.policy()
+    active = [b for b in state['booked_visits'] if b.get('status') == 'confirmed']
+    if active and (len(active) != 1 or active[0]['meeting_id'] != replaces_meeting_id):
+        return {'error': 'A confirmed visit already exists. Reschedule or cancel it first.'}
     if replaces_meeting_id and not active:
-        return {'error':'No active visit exists to replace.'}
-    proposal=state.get('booking_proposal')
-    if not proposal or proposal.get('status')!='offered' or proposal.get('proposal_id')!=proposal_id:
-        return {'error':'There is no matching active appointment offer. Search slots again.'}
+        return {'error': 'No active visit exists to replace.'}
+    proposal = state.get('booking_proposal')
+    if not proposal or proposal.get('status') != 'offered' or proposal.get('proposal_id') != proposal_id:
+        return {'error': 'There is no matching active appointment offer. Search slots again.'}
     try:
-        expiry=datetime.fromisoformat(proposal['expires_at'].replace('Z','+00:00'))
-        if datetime.now(timezone.utc)>=expiry:
-            return {'error':'The appointment offer expired. Search current availability again.'}
-        day=date_input(date_str)
-        start_time=time.fromisoformat(start_time).strftime('%H:%M')
-    except (ValueError,TypeError):
-        return {'error':'Invalid booking date or time.'}
+        if datetime.now(timezone.utc) >= datetime.fromisoformat(proposal['expires_at'].replace('Z', '+00:00')):
+            return {'error': 'Appointment offer expired. Search availability again.'}
+        day = date_input(date_str)
+        start_time = time.fromisoformat(start_time).strftime('%H:%M')
+        if not day or int(start_time[3:]) != 0:
+            return {'error': 'Visits must start on a full hour.'}
+    except (ValueError, TypeError):
+        return {'error': 'Invalid booking date or time.'}
     if not _explicit_lead_confirmation(state):
-        return {'error':'Explicit lead acceptance is required in a new message before a booking can be simulated.'}
-    if proposal.get('offer_source_message_id')==state.get('_active_source_message_id'):
-        return {'error':'The lead must confirm in a subsequent conversation turn.'}
-    option=next((opt for opt in proposal['options'] if opt['advisor_id']==advisor_id
-                 and opt['date']==day and opt['start_time']==start_time),None)
-    if option is None:
-        return {'error':'This option was not offered. Request fresh availability.'}
-    available=scheduling.available_slots(state,date_filter=date.fromisoformat(day),extra_occupied=extra_occupied)
-    if not any(opt['advisor_id']==advisor_id and opt['date']==day and opt['start_time']==start_time for opt in available):
-        return {'error':'This slot is no longer available. Search again.'}
-    units={u['unit_id']:u for u in read_catalog()['properties']}
-    if unit_id is not None and unit_id not in units:
-        return {'error':'Unknown or unavailable property unit. A general project visit may omit unit_id.'}
-    if not all(isinstance(x,str) and x.strip() for x in (first_name,last_name,email,phone)):
-        return {'error':'First name, last name, email and phone must be provided.'}
-    changed=update_lead(state,first_name=first_name,last_name=last_name,email=email,phone=phone,
-                        **({'interest_unit_id':unit_id} if unit_id else {}))
-    if 'error' in changed:return changed
-    selected=units.get(unit_id) if unit_id else None
-    start_utc=scheduling.instant(date.fromisoformat(day),start_time)
-    visit_end=start_utc+timedelta(minutes=policy['visit_duration_minutes'])
-    buffered_end=visit_end+timedelta(minutes=policy['buffer_after_minutes'])
-    meeting_id=str(uuid.uuid4());booking_operation_id=str(uuid.uuid4())
-    bp=state['bp_episode']; project=read_catalog()['project_info']
-    booking={'booking_id':'DEMO-'+meeting_id[:8].upper(), 'meeting_id':meeting_id,
-             'proposal_id':proposal_id,'first_name':first_name.strip(), 'last_name':last_name.strip(),
-             'email':email.strip(), 'phone':phone.strip(), 'unit_id':unit_id,
-             'advisor_id':advisor_id, 'advisor_name':option['advisor_name'],
-             'date':day,'start_time':start_time,'end_time':visit_end.astimezone(PROJECT_TZ).strftime('%H:%M'),
-             'buffer_until':buffered_end.astimezone(PROJECT_TZ).strftime('%H:%M'),
-             'timezone':policy['timezone'],'location':project['location']['onsite_showroom'],
-             'visit_duration_minutes':policy['visit_duration_minutes'],'buffer_minutes':policy['buffer_after_minutes'],
-             'simulation_only':True,'status':'confirmed'}
-    context={'version':'sales-visit-context/1.0','source':'explicit_booking_selection',
-             'project_id':bp['ids']['project_id'],'project_name':project['name'],
-             'property_type_id':selected['property_type_id'] if selected else None,
-             'property_type_name':selected['commercial_name'] if selected else None,
-             'unit_id':selected['blackpenguin_unit_id'] if selected else None,
-             'unit_code':selected['unit_id'] if selected else None,
-             'timezone':policy['timezone'],
-             'property_association':'explicit' if selected else 'unknown'}
-    meeting={'id':meeting_id,'project_id':bp['ids']['project_id'],'lead_id':bp['ids']['lead_id'],
-             'broker_id':None,'assigned_sales_user_id':option['sales_user_id'],
-             'meeting_time':start_utc.isoformat().replace('+00:00','Z'),
-             'meeting_timezone':policy['timezone'],'duration_minutes':policy['visit_duration_minutes'],
-             'buffer_after_minutes':policy['buffer_after_minutes'],
-             'modality':'showroom','confirmation_status':'confirmed','calendar_sync_status':'simulation_ready',
-             'visit_location_label':'Synthetic project showroom','visit_address':project['location']['street_address'],
-             'visit_property_type_id':context['property_type_id'],'visit_unit_id':context['unit_id'],
-             'visit_context':context,'location_confirmation_status':'confirmed',
-             'location_confirmed_by':'synthetic_demo_fixture',
-             'status':'confirmed','source':'agent_simulation','is_demo':True,
-             'gcal_event_id':None,'created_at':datetime.now(timezone.utc).isoformat()}
-    operation={'id':booking_operation_id,'company_id':bp['ids']['company_id'],
-               'project_id':bp['ids']['project_id'],'conversation_id':bp['ids']['conversation_id'],
-               'lead_id':bp['ids']['lead_id'],'proposal_id':proposal_id,'meeting_id':meeting_id,
-               'snapshot_json':{'version':'hermes-demo/booking-receipt/1.0','context':context,
-                                'option':{'starts_at':meeting['meeting_time'],'sales_user_id':option['sales_user_id']},
-                                'preferences':{'duration_minutes':policy['visit_duration_minutes'],'buffer_after_minutes':policy['buffer_after_minutes']}},
-               'calendar_status':'simulation','calendar_attempts':0,'next_attempt_at':None,
-               'created_at':datetime.now(timezone.utc).isoformat()}
-    bp['meetings'].append(meeting);bp['sales_booking_operations'].append(operation)
+        return {'error': 'Explicit acceptance from the lead is required in a subsequent message.'}
+    if proposal.get('offer_source_message_id') == state.get('_active_source_message_id'):
+        return {'error': 'The lead must confirm in a later turn.'}
+    if not any(opt['date'] == day and opt['start_time'] == start_time for opt in proposal['options']):
+        return {'error': 'The selected hour was not offered. Search again.'}
+    if (proposal.get('selected_start_time') != start_time or proposal.get('selected_date') != day or
+            not proposal.get('selected_source_message_id') or
+            proposal.get('selected_source_message_id') == state.get('_active_source_message_id')):
+        return {'error': 'The lead must explicitly choose the offered hour, then confirm in a later turn.'}
+    units = {u['unit_id']: u for u in read_catalog()['properties']}
+    chosen = unit_id or state['lead'].get('interest_unit_id')
+    if not chosen or chosen not in units or chosen != proposal['selected_unit_id']:
+        return {'error': 'Explicitly select one available house before confirming its visit.'}
+    if state['lead'].get('interest_unit_id') != chosen:
+        return {'error': 'The lead must explicitly identify the house to visit.'}
+    if not all(isinstance(x, str) and x.strip() for x in (first_name, last_name, email, phone)):
+        return {'error': 'First name, last name, email and phone are required.'}
+    choices = scheduling.available_slots(state, date_filter=date.fromisoformat(day), extra_occupied=extra_occupied)
+    if not any(opt['date'] == day and opt['start_time'] == start_time for opt in choices):
+        return {'error': 'That hour is no longer available. Search again.'}
+    changed = update_lead(state, first_name=first_name, last_name=last_name, email=email, phone=phone)
+    if 'error' in changed:
+        return changed
+    selected = units[chosen]
+    starts_at = scheduling.instant(date.fromisoformat(day), start_time)
+    visit_end = starts_at + timedelta(minutes=pol['visit_duration_minutes'])
+    buffered_end = visit_end + timedelta(minutes=pol['buffer_after_minutes'])
+    meeting_id = str(uuid.uuid4()); operation_id = str(uuid.uuid4())
+    bp = state['bp_episode']; project = read_catalog()['project_info']
+    # Synthetic location must not produce a real Google Maps pin.
+    visit_location = {'label': 'Synthetic project showroom',
+                      'address': project['location']['street_address'],
+                      'verification_status': 'synthetic', 'maps_url': None,
+                      'note': 'Fictional address; no actual physical appointment is offered.'}
+    booking = {'booking_id': 'DEMO-' + meeting_id[:8].upper(), 'meeting_id': meeting_id,
+               'proposal_id': proposal_id, 'first_name': first_name.strip(),
+               'last_name': last_name.strip(), 'email': email.strip(), 'phone': phone.strip(),
+               'unit_id': chosen, 'advisor_id': None, 'advisor_name': None,
+               'date': day, 'start_time': start_time,
+               'end_time': visit_end.astimezone(PROJECT_TZ).strftime('%H:%M'),
+               'buffer_until': buffered_end.astimezone(PROJECT_TZ).strftime('%H:%M'),
+               'timezone': pol['timezone'], 'location': visit_location['label'],
+               'visit_location': visit_location, 'visit_duration_minutes': pol['visit_duration_minutes'],
+               'buffer_minutes': pol['buffer_after_minutes'],
+               'simulation_only': True, 'status': 'pending_assignment'}
+    context = {'version': 'sales-visit-context/2.0', 'source': 'explicit_booking_selection',
+               'project_id': bp['ids']['project_id'], 'project_name': project['name'],
+               'property_type_id': selected['property_type_id'],
+               'property_type_name': selected['commercial_name'],
+               'unit_id': selected['blackpenguin_unit_id'], 'unit_code': selected['unit_id'],
+               'timezone': pol['timezone'], 'property_association': 'explicit',
+               'visit_location': visit_location}
+    meeting = {'id': meeting_id, 'project_id': bp['ids']['project_id'],
+               'lead_id': bp['ids']['lead_id'], 'broker_id': None,
+               'assigned_sales_user_id': None,
+               'meeting_time': starts_at.isoformat().replace('+00:00', 'Z'),
+               'meeting_timezone': pol['timezone'], 'duration_minutes': pol['visit_duration_minutes'],
+               'buffer_after_minutes': pol['buffer_after_minutes'], 'modality': 'showroom',
+               'confirmation_status': 'pending_assignment', 'calendar_sync_status': 'simulation_ready',
+               'visit_location_label': visit_location['label'], 'visit_address': visit_location['address'],
+               'visit_property_type_id': context['property_type_id'],
+               'visit_unit_id': context['unit_id'], 'visit_context': context,
+               'location_confirmation_status': 'synthetic',
+               'status': 'pending_assignment', 'source': 'agent_simulation',
+               'is_demo': True, 'gcal_event_id': None,
+               'created_at': datetime.now(timezone.utc).isoformat()}
+    operation = {'id': operation_id, 'company_id': bp['ids']['company_id'],
+                 'project_id': bp['ids']['project_id'],
+                 'conversation_id': bp['ids']['conversation_id'], 'lead_id': bp['ids']['lead_id'],
+                 'proposal_id': proposal_id, 'meeting_id': meeting_id,
+                 'snapshot_json': {'version': 'hermes-demo/booking-receipt/2.0',
+                                   'context': context, 'option': {'starts_at': meeting['meeting_time'],
+                                                                 'sales_user_id': None},
+                                   'preferences': {'duration_minutes': pol['visit_duration_minutes'],
+                                                   'buffer_after_minutes': pol['buffer_after_minutes']}},
+                 'calendar_status': 'simulation', 'calendar_attempts': 0,
+                 'next_attempt_at': None, 'created_at': datetime.now(timezone.utc).isoformat()}
+    bp['meetings'].append(meeting)
+    bp['sales_booking_operations'].append(operation)
     state['booked_visits'].append(booking)
-    proposal['status']='confirmed';proposal['meeting_id']=meeting_id
-    bp['sales_dialogue_states']['state_json']['booking_proposal']=None
-    bp['leads']['funnel_stage']='appointment_set'
-    bp['leads']['pipeline_stage']='S04_APPOINTMENT'
-    state['stage']='Visit booked · simulated'
-    record(state,'booking',f'Confirmed demo visit {day} at {start_time} · {option["advisor_name"]}')
-    return {'ok':True,'booking':booking,'meeting':{'id':meeting_id,'status':'confirmed','calendar_sync_status':'simulation_ready'},
-            'notice':'Simulation only. No external calendar synced and no real advisor notified.'}
+    proposal['status'] = 'pending_assignment'; proposal['meeting_id'] = meeting_id
+    bp['sales_dialogue_states']['state_json']['booking_proposal'] = None
+    record(state, 'booking_pending', f'Awaiting transactional assignment for {chosen} {day} {start_time}')
+    return {'ok': True, 'pending_commit': True, 'unit_id': chosen, 'date': day,
+            'start_time': start_time,
+            'notice': 'Pending atomic database confirmation. Do not state that the visit is confirmed or name an advisor yet.'}
 
 
 def cancel_visit(state: dict, meeting_id: str, reason: str | None = None) -> dict:
@@ -748,8 +844,8 @@ def cancel_visit(state: dict, meeting_id: str, reason: str | None = None) -> dic
 
 
 def reschedule_visit(state: dict, original_meeting_id: str, first_name: str, last_name: str,
-                     email: str, phone: str, advisor_id: str, date_str: str, start_time: str,
-                     proposal_id: str, unit_id: str | None = None, *, extra_occupied: dict | None = None) -> dict:
+                     email: str, phone: str, advisor_id: str | None = None, date_str: str = "", start_time: str = "",
+                     proposal_id: str = "", unit_id: str | None = None, *, extra_occupied: dict | None = None) -> dict:
     """New meeting replaces previous: old Meeting is cancelled, history preserved."""
     bp=state['bp_episode']
     old=next((m for m in bp['meetings'] if m['id']==original_meeting_id and m['status']=='confirmed'
@@ -770,17 +866,17 @@ def reschedule_visit(state: dict, original_meeting_id: str, first_name: str, las
         'project_id':bp['ids']['project_id'],'conversation_id':bp['ids']['conversation_id'],
         'lead_id':bp['ids']['lead_id'],'proposal_id':proposal_id,
         'original_meeting_id':original_meeting_id,
-        'replacement_meeting_id':new['meeting']['id'],
+        'replacement_meeting_id':bp['meetings'][-1]['id'],
         'replacement_booking_operation_id':latest['id'],
         'snapshot_json':{'version':'hermes-demo/reschedule/1.0',
                          'original':{'meeting_id':original_meeting_id,'starts_at':old['meeting_time']},
-                         'replacement':{'meeting_id':new['meeting']['id'],
+                         'replacement':{'meeting_id':bp['meetings'][-1]['id'],
                                         'starts_at':bp['meetings'][-1]['meeting_time']}},
         'calendar_status':'simulation','created_at':datetime.now(timezone.utc).isoformat()})
     state['stage']='Visit rescheduled · simulated'
     record(state,'reschedule',f'Rescheduled simulated visit to {date_str} {start_time}')
     return {'ok':True,'original_meeting_id':original_meeting_id,
-            'replacement_meeting_id':new['meeting']['id'], 'booking':new['booking'],
+            'replacement_meeting_id':bp['meetings'][-1]['id'], 'booking':state['booked_visits'][-1],
             'notice':'Simulation only; original appointment was cancelled in this session and a replacement was created.'}
 
 

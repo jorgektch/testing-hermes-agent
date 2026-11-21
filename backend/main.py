@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 from app import domain, persistence as db, scheduling
 from app.hermes_runtime import chat
 
-app = FastAPI(title='Hermes Agent Evaluation Lab', version='6.0.0', docs_url=None, redoc_url=None)
+app = FastAPI(title='Hermes Agent Evaluation Lab', version='8.0.0', docs_url=None, redoc_url=None)
 
 @app.middleware('http')
 async def private_api_headers(request: Request, call_next):
@@ -32,7 +32,7 @@ async def private_api_headers(request: Request, call_next):
         response.headers['Referrer-Policy'] = 'no-referrer'
     return response
 
-MAX_TURNS = 14
+MAX_TURNS = int(os.environ.get('DEMO_MAX_TURNS', '30'))
 COOKIE = 'hermes_lab_session'
 PROJECT_ZONE = ZoneInfo('America/Lima')
 
@@ -116,7 +116,7 @@ def _get_lead(lead_id: str, auth: dict) -> dict:
 
 @app.get('/api/health')
 def health():
-    return {'ok':True,'agent':'Nous Research Hermes','version':'6.0.0',
+    return {'ok':True,'agent':'Nous Research Hermes','version':'8.0.0',
             'model':os.getenv('MODEL_NAME','openai/gpt-4o-mini'),
             'configured':bool(os.getenv('OPENROUTER_API_KEY')),
             'database_mode':'turso' if os.getenv('TURSO_DATABASE_URL') else ('unconfigured' if os.getenv('VERCEL') else 'local_sqlite')}
@@ -143,7 +143,7 @@ def login(body: LoginInput, request: Request, response: Response):
     secure=bool(os.getenv('VERCEL')) or request.url.scheme=='https'
     response.set_cookie(COOKIE,token,max_age=db.SESSION_DAYS*86400,
                         httponly=True,secure=secure,samesite='lax',path='/')
-    return {**info,'csrf_token':csrf_for_value(token),'signed_in':True}
+    return {**info,'csrf_token':csrf_for_value(token),'signed_in':True,'max_turns':MAX_TURNS}
 
 
 def csrf_for_value(token: str) -> str:
@@ -154,7 +154,7 @@ def csrf_for_value(token: str) -> str:
 
 @app.get('/api/me')
 def current_user(request: Request, auth: dict = Depends(auth_session)):
-    return {**auth,'csrf_token':csrf_for(request)}
+    return {**auth,'csrf_token':csrf_for(request),'max_turns':MAX_TURNS}
 
 
 @app.post('/api/auth/logout')
@@ -167,6 +167,12 @@ def logout(request: Request, response: Response, auth: dict = Depends(checked_se
 @app.get('/api/leads')
 def leads(auth: dict=Depends(auth_session)):
     return {'leads':db.list_leads(auth)}
+
+
+@app.get('/api/admin/storage')
+def admin_storage(auth: dict = Depends(auth_session)):
+    # Safe metadata only: no database URL, credentials, leads or conversation text.
+    return db.storage_diagnostics()
 
 
 @app.post('/api/leads',status_code=201)
@@ -199,11 +205,12 @@ def _finish_turn(lead_id: str, rec: dict, state: dict, auth: dict,
     if on_tool_state is not None:
         options['on_tool_state'] = on_tool_state
     result = chat(message, rec['hermes_history'], state, **options)
-    domain.end_turn(state, result['reply'])
+    safe_reply = domain.redact_unconfirmed_advisor_names(result['reply'], state)
+    domain.end_turn(state, safe_reply)
     state['turn_count'] += 1
     updated = db.save_turn(auth, lead_id, rec['revision'], state,
-                           result['history'][-90:], message, result['reply'])
-    return {'reply': result['reply'], 'lead': _public_record(updated), 'max_turns': MAX_TURNS}
+                           result['history'][-90:], message, safe_reply)
+    return {'reply': updated.get('last_assistant_reply', safe_reply), 'lead': _public_record(updated), 'max_turns': MAX_TURNS}
 
 
 @app.post('/api/leads/{lead_id}/chat')
@@ -212,7 +219,7 @@ def interact(lead_id: uuid.UUID, body: MessageInput, auth: dict=Depends(checked_
     rec = _get_lead(lead_id, auth)
     state = copy.deepcopy(rec['state'])
     if state['turn_count'] >= MAX_TURNS:
-        raise HTTPException(429, 'This lead has reached the 14-turn demo limit.')
+        raise HTTPException(429, 'This lead has reached the demo turn limit.')
     try:
         message = body.message.strip()
         _begin_turn(state, message)
@@ -241,7 +248,7 @@ def interact_stream(lead_id: uuid.UUID, body: MessageInput,
     lead_id = str(lead_id)
     rec = _get_lead(lead_id, auth)
     if rec['state']['turn_count'] >= MAX_TURNS:
-        raise HTTPException(429, 'This lead has reached the 14-turn demo limit.')
+        raise HTTPException(429, 'This lead has reached the demo turn limit.')
     message = body.message.strip()
     state = copy.deepcopy(rec['state'])
 

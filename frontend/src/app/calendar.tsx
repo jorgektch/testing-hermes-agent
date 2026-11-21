@@ -16,7 +16,7 @@ function addDay(date:string,days:number){const d=new Date(date+'T12:00:00Z');d.s
 function localTime(iso:string,tz:string){return dateParts(new Date(iso),tz);}
 function readable(date:string,tz:string){return new Intl.DateTimeFormat('en-US',{weekday:'short',month:'short',day:'numeric',timeZone:tz}).format(new Date(date+'T12:00:00Z'));}
 function minute(v:string){const [h,m]=v.split(':').map(Number);return h*60+m;}
-const START=8*60,END=19*60,STEP=30,HEIGHT=36;
+const START=8*60,END=19*60,STEP=60,HEIGHT=60;
 const timeLabels=Array.from({length:(END-START)/STEP},(_,i)=>`${pad(Math.floor((START+i*STEP)/60))}:${pad((START+i*STEP)%60)}`);
 
 export default function SalesCalendar({refresh=0}:{refresh?:number}){
@@ -60,7 +60,7 @@ export default function SalesCalendar({refresh=0}:{refresh?:number}){
   function toggle(id:string){const all=calendar?.advisors.map(a=>a.advisor_id)||[];const current=new Set(selected.length?selected:all);if(current.has(id))current.delete(id);else current.add(id);setSelected([...current]);}
   return <section className={`sales-calendar ${expanded?'calendar-expanded':''}`} aria-label="Sales advisor calendar">
     <div className="calendar-header">
-      <div><h3><CalendarDays size={16}/> Sales calendar</h3><small>Advisor schedules · Bookings · Available slots</small></div>
+      <div><h3><CalendarDays size={16}/> Sales calendar</h3><small>Hourly starts · 45-minute visits + 15-minute buffer</small></div>
       <button className="icon-btn" title={expanded?'Collapse calendar':'Expand calendar'} aria-label="Toggle expanded calendar" onClick={()=>setExpanded(!expanded)}>{expanded?<Minimize size={17}/>:<Expand size={17}/>}</button>
     </div>
     <div className="calendar-controls">

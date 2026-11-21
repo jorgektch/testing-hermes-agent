@@ -1,7 +1,7 @@
 'use client';
 
 import {useCallback,useEffect,useRef,useState} from 'react';
-import {ArrowDown,ArrowUp,Bath,BedDouble,Building2,CalendarDays,Check,ChevronDown,ChevronRight,FileText,Images,Info,LockKeyhole,LogOut,MapPin,MessageCircle,Plus,ShieldCheck,Square,Trash2,UserRound,Users,X} from 'lucide-react';
+import {ArrowDown,ArrowUp,Bath,BedDouble,Building2,CalendarDays,Check,ChevronDown,ChevronRight,Copy,Download,FileText,Images,Info,LockKeyhole,LogOut,MapPin,MessageCircle,Plus,ShieldCheck,Square,Trash2,UserRound,Users,X} from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import SalesCalendar from './calendar';
@@ -9,17 +9,17 @@ import SalesCalendar from './calendar';
 type Unit={unit_id:string;blackpenguin_unit_id:string;property_type_id:string;property_type:'Apartment'|'House';commercial_name:string;property_type_code?:string;property_type_description?:string;bedrooms:number;bathrooms:number;area_sqm:number;lot_area_m2?:number|null;floor_number?:number|null;price_usd:number;currency?:string;available_from_date:string;status:string;confirmed_features?:Record<string,string|number|boolean>;highlights:string[];media:{gallery_urls:string[];gallery_url:string|null;floorplan_brochure_pdf:string|null;documents:{type:string;title:string;url:string;scope:'unit';unit_id:string}[]};demo_inventory_last_updated_at?:string;publication_status?:string;inventory_is_live?:boolean;phase_id?:string;phase_name?:string;property_model?:{model_name:string;code:string;bedrooms?:number;bathrooms?:number;built_area_min_m2?:number;built_area_max_m2?:number;lot_area_min_m2?:number;lot_area_max_m2?:number;total_units?:number;review_status?:string;inventory_updated_at?:string;verified_type_features?:{feature_key:string;verification_status:string;value_text?:string;value_number?:string;value_bool?:boolean}[]};};
 type Catalog={project_info:{name:string;developer:string;project_type?:string;development_status?:string;short_description?:string;long_description?:string;project_code?:string;value_proposition:string;amenities:string[];phase_names?:string[];published_revision?:number;inventory_summary?:{total_units:number;available_units:number;reserved_units:number};general_brochure_pdf:string;location:{street_address:string;city:string;country:string;timezone?:string}};properties:Unit[]};
 type Fact={id:string;field:string;value:unknown;status:string;source:string;evidence?:string;captured_at?:string;source_ref?:{message_id?:string}};
-type Booking={meeting_id:string;advisor_name:string;unit_id:string|null;date:string;start_time:string;end_time:string;status:string};
-type State={ui_fact_evidence?:Record<string,Evidence>;tool_observations?:ToolObservation[];lead:{first_name:string|null;last_name:string|null;phone:string|null;email:string|null;budget_usd:number|null;purchase_timeframe:string|null;property_type:string|null;min_bedrooms:number|null;interest_unit_id:string|null};stage:string;turn_count:number;shortlisted_unit_ids:string[];booked_visits:Booking[];property_interests?:{unit_id:string;status:string;source_message_id?:string}[];booking_proposal?:{proposal_id:string;status:string;expires_at:string;options:{advisor_id:string;advisor_name:string;date:string;start_time:string;visit_end_time:string;buffer_end_time:string}[]}|null;bp_episode?:{leads:{lead_profile_data:{sales_profile:{current:Record<string,Fact>}}}}};
+type Booking={meeting_id:string;advisor_name:string|null;unit_id:string|null;date:string;start_time:string;end_time:string;status:string;visit_location?:{label:string;address?:string;maps_url:string|null;verification_status:string}};
+type State={ui_fact_evidence?:Record<string,Evidence>;tool_observations?:ToolObservation[];lead:{first_name:string|null;last_name:string|null;phone:string|null;email:string|null;budget_usd:number|null;purchase_timeframe:string|null;property_type:string|null;min_bedrooms:number|null;interest_unit_id:string|null};stage:string;turn_count:number;shortlisted_unit_ids:string[];booked_visits:Booking[];property_interests?:{unit_id:string;status:string;source_message_id?:string}[];booking_proposal?:{proposal_id:string;status:string;expires_at:string;options:{date:string;start_time:string}[]}|null;bp_episode?:{leads:{lead_profile_data:{sales_profile:{current:Record<string,Fact>}}}}};
 type Evidence={source_message_id?:string;message_id?:string;captured_at?:string;evidence?:string;source?:string};
 type ToolObservation={tool:string;status:string;fields:string[];timestamp:string;message_id?:string};
 type ProfilePreview={lead:State['lead'];stage:string;property_interests:NonNullable<State['property_interests']>;facts:Record<string,Fact>;ui_fact_evidence:Record<string,Evidence>;tool_observations:ToolObservation[]};
 type Message={id:string;role:'user'|'assistant';content:string;created_at:string;sequence_number?:number};
 type Lead={id:string;conversation_id:string;first_name:string;last_name:string;email:string;phone:string;updated_at:string;created_at:string;revision:number;state:State;messages:Message[]};
 type Summary={id:string;conversation_id:string;first_name:string;last_name:string;updated_at:string;last_message:string|null};
-type Session={id:string;role:'administrator';owner_id:string;csrf_token:string};
+type Session={id:string;role:'administrator';owner_id:string;csrf_token:string;max_turns?:number};
 const usd=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0});
-const MAX_TURNS=14;
+const MAX_TURNS=30;
 const EMPTY_FORM={first_name:'',last_name:'',phone:'',email:''};
 function dateText(s:string){return s==='Immediate'?'Ready now':s||'Not specified';}
 function formatChatTimestamp(value:string, timeZone:string){
@@ -32,6 +32,14 @@ function chatDay(value:string,timeZone:string){
   const dt=new Date(value);
   return Number.isNaN(dt.getTime())?'Date unavailable':new Intl.DateTimeFormat('en-GB',
     {timeZone,day:'numeric',month:'long',year:'numeric'}).format(dt);
+}
+function smsMetrics(text:string){
+  const gsmBasic=new Set(`@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !"#¤%&'()*+,-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà`);
+  const extension=new Set('^{}\\[~]|€');
+  const chars=Array.from(text);const gsm=chars.every(c=>gsmBasic.has(c)||extension.has(c));
+  const units=gsm?chars.reduce((total,c)=>total+(extension.has(c)?2:1),0):text.length;
+  const limit=gsm?160:70,concat=gsm?153:67;
+  return {encoding:gsm?'GSM-7':'UCS-2',units,segments:units<=limit?1:Math.ceil(units/concat),limit};
 }
 function FactRow({label,value,evidence,timeZone,onLocate}:{label:string;value:unknown;evidence?:Evidence;timeZone:string;onLocate:(id:string)=>void}){
   const text=value==null||value===''?'Not captured':String(value);
@@ -103,8 +111,11 @@ export default function Page(){
   const [liveProfile,setLiveProfile]=useState<ProfilePreview|null>(null);
   const [highlightedMessage,setHighlightedMessage]=useState<string|null>(null);
   const [timeZone,setTimeZone]=useState('America/Lima');
+  const [copiedMessage,setCopiedMessage]=useState<string|null>(null);
+  const [storageInfo,setStorageInfo]=useState<{mode:string;database_fingerprint:string;counts:Record<string,number>;environment:string}|null>(null);
   const chatBody=useRef<HTMLDivElement>(null);
   const state=active?.state;
+  const turnLimit=auth?.max_turns||MAX_TURNS;
   const viewLead=liveProfile?.lead||state?.lead;
   const profileFacts=liveProfile?.facts||state?.bp_episode?.leads?.lead_profile_data?.sales_profile?.current||{};
   const profileEvidence=liveProfile?.ui_fact_evidence||state?.ui_fact_evidence||{};
@@ -119,6 +130,30 @@ export default function Page(){
     if(el){el.scrollIntoView({behavior:'smooth',block:'center'});setHighlightedMessage(messageId);
       window.setTimeout(()=>setHighlightedMessage(v=>v===messageId?null:v),2400);}
   }
+  async function copyMessage(message:Message){
+    try{await navigator.clipboard.writeText(message.content);setCopiedMessage(message.id);
+      window.setTimeout(()=>setCopiedMessage(v=>v===message.id?null:v),1600);
+    }catch{setError('Clipboard access was denied by the browser.');}
+  }
+  function downloadConversation(){
+    if(!active)return;
+    const content={schema_version:'hermes-demo/conversation-export/1.0',
+      exported_at:new Date().toISOString(),project:catalog?.project_info.name,
+      lead:{id:active.id,first_name:active.first_name,last_name:active.last_name,
+        phone:active.phone,email:active.email,created_at:active.created_at},
+      conversation:{id:active.conversation_id,revision:active.revision,
+        messages:displayMessages.filter(m=>m.id!=='pending'),state:active.state}};
+    const blob=new Blob([JSON.stringify(content,null,2)],{type:'application/json;charset=utf-8'});
+    const url=URL.createObjectURL(blob);const link=document.createElement('a');
+    link.href=url;link.download=`hermes-${active.id.slice(0,8)}-conversation.json`;
+    document.body.appendChild(link);link.click();link.remove();
+    window.setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }
+  async function inspectStorage(){
+    const r=await fetch('/api/admin/storage',{credentials:'same-origin'});
+    if(!r.ok){setError('Unable to inspect database identity.');return;}
+    setStorageInfo(await r.json());
+  }
   const currentBooking=(state?.booked_visits||[]).find(b=>b.status==='confirmed');
   const properties=(catalog?.properties||[]).filter(p=>p.property_type==='House');
   const authorizedHeaders: Record<string,string>={'Content-Type':'application/json', ...(auth?{'X-Demo-Csrf':auth.csrf_token}:{})};
@@ -128,6 +163,9 @@ export default function Page(){
   useEffect(()=>{fetch('/api/catalog').then(r=>r.json()).then(setCatalog).catch(()=>setError('Cannot load the published catalog.'));
     fetch('/api/me',{credentials:'same-origin'}).then(r=>r.ok?r.json():null).then(s=>{if(s)setAuth(s)}).catch(()=>{});},[]);
   useEffect(()=>{if(auth)void refreshLeads();else{setLeads([]);setActive(null)}},[auth,refreshLeads]);
+  // Reopen the latest saved lead on sign-in; deployment does not mean a fresh chat.
+  useEffect(()=>{if(auth&&!active&&!busy&&leads.length>0)void selectLead(leads[0].id)},
+    [auth,active,busy,leads,selectLead]);
   // Refresh server-owned state on returning to the tab; keep the 20s poll as fallback.
   useEffect(()=>{
     if(!auth||busy)return;
@@ -154,7 +192,7 @@ export default function Page(){
   async function newLead(){if(!auth||busy)return;setBusy(true);setError('');try{const r=await fetch('/api/leads',{method:'POST',headers:authorizedHeaders,body:JSON.stringify(form)});const data=await r.json();if(!r.ok)throw new Error(data.detail||'Failed to create lead');setActive(data);setForm({...EMPTY_FORM});setShowCreate(false);setLeftView('inventory');await refreshLeads();}catch(e){setError(e instanceof Error?e.message:'Unable to create lead')}finally{setBusy(false)}}
   async function send(){
     const message=draft.trim();
-    if(!auth||!active||!message||busy||state?.turn_count===MAX_TURNS)return;
+    if(!auth||!active||!message||busy||state?.turn_count>=turnLimit)return;
     setBusy(true);setError('');setDraft('');setLiveProfile(null);
     const original=active;
     setActive({...active,messages:[...active.messages,{id:'pending',role:'user',content:message,
@@ -217,7 +255,7 @@ export default function Page(){
             </>:<SalesCalendar refresh={calendarTick}/>}
           </div>
         </section>
-        <section className="panel chat-panel"><div className="panel-top chat-top"><div><h2>Hermes conversation</h2><small>{active?`${active.first_name} ${active.last_name} · ${active.state.turn_count}/${MAX_TURNS} turns`:'No lead selected'}</small></div><button className="primary compact" onClick={()=>setShowCreate(true)}><Plus size={14}/> New lead</button></div>
+        <section className="panel chat-panel"><div className="panel-top chat-top"><div><h2>Hermes conversation</h2><small>{active?`${active.first_name} ${active.last_name} · ${active.state.turn_count}/${turnLimit} turns`:'No lead selected'}</small></div><div className="chat-actions">{active&&<button className="ghost compact" onClick={downloadConversation} title="Export full conversation and lead state"><Download size={14}/> JSON</button>}<button className="primary compact" onClick={()=>setShowCreate(true)}><Plus size={14}/> New lead</button></div></div>
           <div className="lead-switch"><button className="lead-switch-button" onClick={()=>setShowLeads(!showLeads)}><Users size={16}/><span>{active?`${active.first_name} ${active.last_name}`:'Select a lead'}</span><ChevronDown size={15}/></button>{showLeads&&<div className="lead-dropdown">{leads.length?leads.map(l=><div className={`lead-option ${active?.id===l.id?'active':''}`} key={l.id}><button onClick={()=>void selectLead(l.id)}><UserRound size={15}/><span><strong>{l.first_name} {l.last_name}</strong><small>{l.last_message?.slice(0,55)||'No messages'}</small></span></button>{auth.role==='administrator'&&<button aria-label={`Delete ${l.first_name} ${l.last_name}`} className="icon-btn danger" onClick={()=>{setDeleteId(l.id);setShowLeads(false)}}><Trash2 size={15}/></button>}</div>):<p>No leads yet. Create one to begin.</p>}</div>}</div>
           {active?<><div className="chat-messages" ref={chatBody} onScroll={e=>{const el=e.currentTarget;setShowJump(el.scrollHeight-el.scrollTop-el.clientHeight>110)}}>
             {displayMessages.map((m,i)=>{
@@ -227,14 +265,14 @@ export default function Page(){
                 {day!==previous&&<div className="chat-date-divider" aria-label={`Messages from ${day}`}>{day}</div>}
                 <div data-message-id={m.id} className={`message ${m.role} ${busy&&!m.sequence_number?'message-provisional':''} ${highlightedMessage===m.id?'message-highlighted':''}`}>
                   <div className="message-meta"><span>{m.role==='assistant'?'AI Sales Agent · Hermes':'Lead'}</span>
-                    <time dateTime={m.created_at} title={m.created_at}>{formatChatTimestamp(m.created_at,timeZone)}{busy&&!m.sequence_number?' · pending':''}</time></div>
-                  <div className="message-content"><ChatMarkdown text={m.content}/></div>
+                    <time dateTime={m.created_at} title={m.created_at}>{formatChatTimestamp(m.created_at,timeZone)}{busy&&!m.sequence_number?' · pending':''}</time><button className="message-copy" onClick={()=>void copyMessage(m)} title="Copy message text" aria-label="Copy message"><Copy size={12}/>{copiedMessage===m.id?'Copied':''}</button></div>
+                  <div className="message-content"><ChatMarkdown text={m.content}/></div><div className="sms-indicator">{m.role==='assistant'?'SMS · ':'Lead · '}{smsMetrics(m.content).units} units · {smsMetrics(m.content).encoding} · {smsMetrics(m.content).segments} segment(s)</div>
                 </div>
               </div>;
             })}
             {busy&&<div className="message assistant"><div className="message-role">AI Sales Agent · Hermes</div><div className="message-content">Thinking…</div></div>}
           </div>{showJump&&<button className="jump-bottom" onClick={()=>{chatBody.current?.scrollTo({top:chatBody.current.scrollHeight,behavior:'smooth'});setShowJump(false)}}><ArrowDown size={14}/> Latest</button>}
-          <div className="composer-area"><div className="composer-box"><textarea rows={2} value={draft} onChange={e=>setDraft(e.target.value)} disabled={busy||state?.turn_count===MAX_TURNS} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();void send()}}} placeholder={state?.turn_count===MAX_TURNS?'Demo limit reached':'Type as this fictional lead…'}/><button className="send-btn" disabled={!draft.trim()||busy||state?.turn_count===MAX_TURNS} aria-label="Send" onClick={()=>void send()}><ArrowUp size={18}/></button></div><div className="fineprint">Conversations and meetings are saved in the shared demo database. No real sales notifications are sent.</div></div></>:<div className="empty-chat"><MessageCircle size={28}/><h3>Start with a demo lead</h3><p>Create fictional contact details or select a previous conversation.</p><button className="primary" onClick={()=>setShowCreate(true)}><Plus size={14}/> New lead</button></div>}
+          <div className="composer-area"><div className="composer-box"><textarea rows={2} value={draft} onChange={e=>setDraft(e.target.value)} disabled={busy||state?.turn_count>=turnLimit} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();void send()}}} placeholder={state?.turn_count>=turnLimit?'Demo limit reached':'Type as this fictional lead…'}/><button className="send-btn" disabled={!draft.trim()||busy||state?.turn_count>=turnLimit} aria-label="Send" onClick={()=>void send()}><ArrowUp size={18}/></button></div><div className="fineprint">Messages are simulated in SMS format. Visit confirmations and history are saved in Turso. No messages are sent to real phones.</div></div></>:<div className="empty-chat"><MessageCircle size={28}/><h3>Start with a demo lead</h3><p>Create fictional contact details or select a previous conversation.</p><button className="primary" onClick={()=>setShowCreate(true)}><Plus size={14}/> New lead</button></div>}
         </section>
         <section className="panel lead-panel"><div className="panel-top"><div><h2>Lead state</h2><small>{liveProfile?'Updating · pending save':active?'Saved facts · '+timeZone:'Waiting for a lead'}</small></div></div>
           <div className="panel-scroll lead-scroll">{active&&state?<>{liveProfile&&<p className="profile-preview-note">Provisional facts · awaiting Hermes completion and Turso commit</p>}
@@ -246,7 +284,14 @@ export default function Page(){
               <FactRow label="Bedrooms" value={viewLead?.min_bedrooms} evidence={profileFacts.bedrooms?{...profileFacts.bedrooms,source_message_id:profileFacts.bedrooms.source_ref?.message_id}:undefined} timeZone={timeZone} onLocate={locateMessage}/>
               <small className="stage-label">{liveProfile?.stage||state.stage}</small>
             </section>
-            <section className="state-section"><h3>Property interest</h3><div className="state-kv"><span>Active unit</span><strong>{viewLead?.interest_unit_id||'Not declared'}</strong></div>{interests.length?<div className="interest-list">{interests.map(i=><button key={i.unit_id} onClick={()=>{const u=catalog?.properties.find(u=>u.unit_id===i.unit_id);if(u)setSelected(u)}}><span>{i.unit_id}</span><small>{i.status}</small><ChevronRight size={13}/></button>)}</div>:<small className="muted">Unit mentions and explicit interest will appear here.</small>}{state.shortlisted_unit_ids.length>0&&<small className="muted">Matched by agent: {state.shortlisted_unit_ids.join(', ')}</small>}</section>
+            <section className="state-section"><h3>Project focus</h3>
+              <div className="state-kv"><span>Project</span><strong>{catalog?.project_info.name||'Not available'}</strong></div>
+              <div className="state-kv"><span>Operation</span><strong>House sale</strong></div>
+              <div className="state-kv"><span>Selected house</span><strong>{viewLead?.interest_unit_id||'Not selected'}</strong></div>
+              {state.shortlisted_unit_ids.length>0&&<small className="muted">Matching houses: {state.shortlisted_unit_ids.join(', ')}</small>}
+              {interests.length>0&&<div className="interest-list">{interests.map(i=><button key={i.unit_id} onClick={()=>{const u=catalog?.properties.find(u=>u.unit_id===i.unit_id);if(u)setSelected(u)}}><span>{i.unit_id}</span><small>{i.status}</small><ChevronRight size={13}/></button>)}</div>}
+              <div className="focus-location"><MapPin size={13}/><span>{viewLead?.interest_unit_id?`Visit location: ${catalog?.project_info.location.street_address||'Pending verification'}`:'Select a house before booking a visit.'}<small>Synthetic address; no verified Maps destination.</small></span></div>
+            </section>
             {additionalFacts.length>0&&<section className="state-section"><h3>Other captured commercial facts</h3>
               {additionalFacts.map(f=><FactRow key={f.id} label={f.field.replaceAll('_',' ')} value={f.value}
                 evidence={{...f,source_message_id:f.source_ref?.message_id}} timeZone={timeZone} onLocate={locateMessage}/>)}
@@ -256,9 +301,10 @@ export default function Page(){
                 <strong>{o.tool} · {o.status}</strong><small>{o.fields.join(', ')} · {formatChatTimestamp(o.timestamp,timeZone)}</small>
               </div>)}
             </details>}
-            <section className="state-section"><h3>Appointment</h3>{currentBooking?<div className="appointment-card"><div className="status-line"><Check size={13}/> Confirmed · Demo only</div><strong>{currentBooking.date} · {currentBooking.start_time}–{currentBooking.end_time}</strong><small>{currentBooking.advisor_name}</small><small>{currentBooking.unit_id||'General project visit'}</small></div>:<div className="no-appointment">No confirmed appointment</div>}{state.booking_proposal?.status==='offered'&&<div className="offer-summary"><small>Offered · not booked · expires {new Date(state.booking_proposal.expires_at).toLocaleTimeString()}</small>{state.booking_proposal.options.map(opt=><div key={`${opt.advisor_id}-${opt.date}-${opt.start_time}`}>{opt.date} {opt.start_time} · {opt.advisor_name}</div>)}</div>}{state.booked_visits.filter(b=>b.status!=='confirmed').length>0&&<details className="inspector"><summary>Previous visits</summary>{state.booked_visits.filter(b=>b.status!=='confirmed').map(b=><div className="state-kv" key={b.meeting_id}><span>{b.date}</span><strong>{b.status}</strong></div>)}</details>}</section>
+            <section className="state-section"><h3>Appointment</h3>{currentBooking?<div className="appointment-card"><div className="status-line"><Check size={13}/> Confirmed · Demo only</div><strong>{currentBooking.date} · {currentBooking.start_time}–{currentBooking.end_time}</strong><small>{currentBooking.advisor_name||'Advisor assignment pending'}</small><small>{currentBooking.unit_id||'Unlinked legacy appointment'}</small>{currentBooking.visit_location&&<small>{currentBooking.visit_location.address} · Fictional demo location</small>}</div>:<div className="no-appointment">No confirmed appointment</div>}{state.booking_proposal?.status==='offered'&&<div className="offer-summary"><small>Offered · not booked · expires {new Date(state.booking_proposal.expires_at).toLocaleTimeString()}</small>{state.booking_proposal.options.map(opt=><div key={`${opt.date}-${opt.start_time}`}>{opt.date} {opt.start_time}</div>)}</div>}{state.booked_visits.filter(b=>b.status!=='confirmed').length>0&&<details className="inspector"><summary>Previous visits</summary>{state.booked_visits.filter(b=>b.status!=='confirmed').map(b=><div className="state-kv" key={b.meeting_id}><span>{b.date}</span><strong>{b.status}</strong></div>)}</details>}</section>
             <details className="inspector"><summary>Evidence & provenance</summary>{Object.values(profileFacts).map(f=><div className="evidence-line" key={f.id}><strong>{f.field}: {String(f.value)}</strong><small>{f.status} · {f.source}</small><p>{f.evidence}</p></div>)}</details>
-            <details className="inspector"><summary>Inspect conversation state JSON</summary><pre>{JSON.stringify(state,null,2)}</pre></details>
+            <details className="inspector"><summary>Inspect conversation state JSON</summary><button className="export-inline" onClick={downloadConversation}><Download size={13}/> Download full JSON</button><pre>{JSON.stringify(state,null,2)}</pre></details>
+            <details className="inspector"><summary>Database persistence</summary><button className="export-inline" onClick={()=>void inspectStorage()}>Check Turso storage</button>{storageInfo&&<div className="storage-diagnostics"><small>{storageInfo.environment} · {storageInfo.mode} · database {storageInfo.database_fingerprint}</small><small>Leads {storageInfo.counts.leads} · Conversations {storageInfo.counts.conversations} · Messages {storageInfo.counts.messages} · Meetings {storageInfo.counts.meetings}</small></div>}</details>
           </>:<div className="lead-empty"><UserRound size={25}/><p>Select a lead to inspect its qualification, interest and appointments.</p></div>}</div>
         </section>
       </main>}

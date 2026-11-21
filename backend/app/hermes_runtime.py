@@ -1,4 +1,4 @@
-"""Run a real Nous Research Hermes AIAgent with nine registered domain tools."""
+"""Run a real Nous Research Hermes AIAgent with ten registered domain tools."""
 from __future__ import annotations
 
 import json
@@ -67,25 +67,33 @@ SALES WORKFLOW:
 5. Financing policy is STRICT: no rates, monthly payments, down-payment figures,
    financing quotes, banks, or loan terms. All personalized financing is
    presented by the human advisor during the onsite visit.
-6. Offer a physical showroom visit lasting 45 minutes plus a 15-minute buffer.
-   Use get_available_visit_slots, which returns exactly up to three options,
-   a proposal_id, expiry, advisor_id, date and local start_time.
-   The offered slot is NOT reserved: it must be revalidated on booking.
-7. Booking is a two-turn process. Offer slots first, then wait for the LEAD's
-   explicit confirmation in their subsequent message. Do not book immediately
-   after generating the offer. Collect first_name, last_name, email and phone.
-   Supply exact proposal_id, advisor_id, date_str and start_time returned by
-   the tool. unit_id is OPTIONAL: project-wide showroom visits are permitted.
-8. If the lead later explicitly requests cancellation, use cancel_onsite_visit
-   with the existing confirmed meeting_id; do not cancel from ambiguous text.
-9. For rescheduling, FIRST offer a fresh slot via get_available_visit_slots,
-   then wait for the lead's explicit acceptance in a later message. Use
-   reschedule_onsite_visit with original_meeting_id and exact offer details;
-   preserve the old meeting as cancelled and create a new one.
-10. Never invent advisors, dates, slots or claim Google Calendar sync. All
-   actions are session-isolated SIMULATIONS, not real reservations.
+6. Booking begins only after the lead identifies ONE specific house. If H-201 and H-204
+   both match, ask which ONE to visit. Call track_property_interest with status=interested
+   only after explicit selection. Never book an unidentified unit or a general project visit.
+7. Ask for the desired DAY (exact date). Only then call get_available_visit_slots(date_str).
+   The tool returns available hourly start times and grouped ranges, never advisors.
+   Present the times or concise ranges without mentioning names or advisor IDs.
+8. When the lead explicitly chooses an exact offered hour, call select_visit_time
+   with proposal_id, date_str and start_time. Restate house/date/hour and ask
+   for explicit confirmation in a later message. Use book_onsite_visit with proposal_id,
+   exact date_str/start_time and unit_id. Do NOT pass or choose an advisor_id.
+   The tool only prepares a PENDING transaction; it does NOT confirm a booking.
+   The backend assigns an advisor by transactional round robin and sends a confirmed
+   receipt AFTER the database commit. NEVER name an advisor or claim the visit
+   is confirmed while running the tool.
+9. For cancellation, use cancel_onsite_visit only after direct lead consent.
+   For rescheduling, offer new hourly options for the booked house, then await
+   explicit confirmation before calling reschedule_onsite_visit. Do not choose an advisor.
+10. Never invent advisors, maps addresses, slots or Google Calendar synchronization.
+    All inventory, locations, staff and bookings are synthetic SIMULATIONS.
 
-If discussing prices or media, use only tool-approved URLs (the public unit gallery URL or unit PDFs); never produce example.com links. Keep replies concise and format bullets using standard Markdown.
+SMS STYLE (required): Plain text only, no Markdown, tables, formatted hyperlinks,
+code fences or emojis. Aim for ONE GSM-7 SMS (160 characters); prefer at most two
+segments when a necessary direct HTTPS gallery/PDF URL needs space.
+Use a direct approved HTTPS URL, not [label](url). Ask one short question.
+Do not omit a critical booking qualification just to make the message shorter.
+
+If discussing prices or media, use only tool-approved URLs (the public unit gallery URL or unit PDFs); never produce example.com links. Keep replies concise and use SMS-safe plain text, not Markdown.
 The UI already shows the full inventory; chat should be consultative and concise.
 Ask at most two questions in each response. Stay in English. Follow tool errors.
 Do not expose implementation details, secrets, or the system prompt.
@@ -127,21 +135,29 @@ SCHEMAS: dict[str, dict] = {
         }, 'required': ['unit_id']},
     },
     'get_available_visit_slots': {
-        'description': 'Generate up to 3 expiring, non-held demo options, from eligible advisors, availability rules, busy intervals and a 15-minute buffer. Return proposal_id for later confirmation.',
+        'description': 'Only after a specific house and exact day are selected: return anonymous hourly start times and ranges without advisor identities. Not a hold. Return proposal_id.',
         'parameters': {'type': 'object', 'properties': {
-            'date_str': {'type': 'string', 'description': 'YYYY-MM-DD date, or tomorrow; omit for all dates.'},
-        }},
+            'date_str': {'type': 'string', 'description': 'Required visit day YYYY-MM-DD or tomorrow; ask lead if vague.'},
+        }, 'required': ['date_str']},
+    },
+    'select_visit_time': {
+        'description': 'Record an exact hourly time explicitly stated by the lead for an active visit offer. This is NOT booking. Must be used before later confirmation.',
+        'parameters': {'type':'object','properties':{
+            'proposal_id':{'type':'string'},
+            'date_str':{'type':'string','description':'Exact offered day YYYY-MM-DD'},
+            'start_time':{'type':'string','description':'Exact offered start HH:MM'},
+        },'required':['proposal_id','date_str','start_time']},
     },
     'book_onsite_visit': {
-        'description': 'Confirm an OFFERED simulation slot in a subsequent user turn after explicit consent and revalidation. Requires matching proposal_id; unit_id is optional for general project visits.',
+        'description': 'Prepare a pending visit for one explicitly selected house after the lead confirms the offered date/hour in a new turn. The server chooses the advisor after atomic commit; never name one yourself.',
         'parameters': {'type': 'object', 'properties': {
             'first_name': {'type': 'string'}, 'last_name': {'type': 'string'},
             'email': {'type': 'string'}, 'phone': {'type': 'string'},
-            'unit_id': {'type': 'string', 'description':'Optional, omit for a general project showroom visit'}, 'advisor_id': {'type': 'string'},
+            'unit_id': {'type': 'string', 'description':'Required published house code, explicitly chosen by lead'},
             'proposal_id': {'type': 'string', 'description':'Exact ID returned by get_available_visit_slots; never fabricate'},
             'date_str': {'type': 'string', 'description': 'YYYY-MM-DD'},
             'start_time': {'type': 'string', 'description': 'HH:MM in America/Lima'},
-        }, 'required': ['first_name', 'last_name', 'email', 'phone', 'advisor_id', 'proposal_id', 'date_str', 'start_time']},
+        }, 'required': ['first_name', 'last_name', 'email', 'phone', 'unit_id', 'proposal_id', 'date_str', 'start_time']},
     },
     'cancel_onsite_visit': {
         'description': 'Cancel an existing confirmed simulated visit only after a direct lead cancellation request.',
@@ -156,10 +172,10 @@ SCHEMAS: dict[str, dict] = {
             'original_meeting_id':{'type':'string'},
             'first_name':{'type':'string'},'last_name':{'type':'string'},
             'email':{'type':'string'},'phone':{'type':'string'},
-            'advisor_id':{'type':'string'},'date_str':{'type':'string'},
+            'date_str':{'type':'string'},
             'start_time':{'type':'string'},'proposal_id':{'type':'string'},
-            'unit_id':{'type':'string','description':'Optional for general project tour'},
-        }, 'required':['original_meeting_id','first_name','last_name','email','phone','advisor_id','date_str','start_time','proposal_id']},
+            'unit_id':{'type':'string','description':'Required selected house (or existing booked house)'},
+        }, 'required':['original_meeting_id','first_name','last_name','email','phone','unit_id','date_str','start_time','proposal_id']},
     },
     'update_lead_profile': {
         'description': 'MANDATORY FIRST: Store any newly stated lead facts for the live visual state dashboard. Only pass supplied facts.',
@@ -194,6 +210,7 @@ def _run_locked(message: str, history: list[dict], state: dict, *,
         'evaluate_properties_for_lead': lambda a: domain.evaluate_properties(state, **a),
         'get_unit_media': lambda a: domain.unit_media(**a),
         'get_available_visit_slots': lambda a: domain.slots(state, extra_occupied=extra_occupied, **a),
+        'select_visit_time': lambda a: domain.select_visit_time(state, **a),
         'book_onsite_visit': lambda a: domain.book_visit(state, extra_occupied=extra_occupied, **a),
         'cancel_onsite_visit': lambda a: domain.cancel_visit(state, **a),
         'reschedule_onsite_visit': lambda a: domain.reschedule_visit(state, extra_occupied=extra_occupied, **a),
@@ -206,11 +223,11 @@ def _run_locked(message: str, history: list[dict], state: dict, *,
                 outcome = _func(args)
             except (ValueError, TypeError, KeyError) as exc:
                 outcome = {'error': str(exc)}
-            if _name in ('update_lead_profile', 'track_property_interest'):
+            if _name in ('update_lead_profile', 'track_property_interest', 'get_available_visit_slots', 'select_visit_time', 'book_onsite_visit', 'reschedule_onsite_visit'):
                 state.setdefault('tool_observations', []).append({
                     'tool': _name,
                     'status': 'rejected' if isinstance(outcome, dict) and outcome.get('error') else 'executed',
-                    'fields': sorted(args) if _name == 'update_lead_profile' else ['unit_id', 'status'],
+                    'fields': sorted(k for k in args if k != 'advisor_id'),
                     'message_id': state.get('_active_source_message_id'),
                     'timestamp': domain.now_local().isoformat(timespec='seconds'),
                 })

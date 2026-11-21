@@ -188,3 +188,16 @@ For details, see [`docs/V4_ARCHITECTURE.md`](docs/V4_ARCHITECTURE.md).
 ## v6: chronologically ordered conversations and live profile
 
 Chat messages now show browser-local dates and `HH:mm:ss`; old mixed-zone message rows are upgraded in place and ordered by a stable per-conversation sequence. The lead panel shows validated facts and message provenance, with provisional previews from Hermes tool executions over authenticated POST/SSE and a final Turso commit. See [v6 architecture and migration notes](docs/V6_CHRONOLOGY_LIVE_PROFILE.md).
+
+## V8 — visit scheduling, SMS and exports
+
+The v8 improvement adds:
+
+- **45-minute visit + 15-minute buffer**, with **hour-aligned start times only**; date-first anonymous availability ranges; an explicit lead-selected house and hour; later affirmative consent; server-side round-robin advisor assignment after the Turso transaction commits. The buyer does **not** choose or see an advisor before confirmation.
+- **SMS-compatible plain-text** Hermes messages, direct HTTPS links and GSM-7 / UCS-2 segment visualization. Long replies are split into SMS-sized chat bubbles rather than silently truncated. The demo does not send SMS.
+- **One-click JSON export** with the lead, saved structured state and ordered messages, and **Copy** on individual messages.
+- A **Project focus** sidebar with selected house and explicitly fictional visit address. Maps links remain unavailable until a verified address is configured.
+- A read-only, administrator-only `/api/admin/storage` endpoint showing a stable database URL fingerprint and aggregate record counts. **Deployments do not delete Turso records**; compare fingerprints to detect accidental changes of database or Preview branch.
+- Optional pinned Production connection with the **paired** `DEMO_PERSISTENT_TURSO_URL` and `DEMO_PERSISTENT_TURSO_TOKEN`, which overrides the Marketplace-managed URL/token pair only when *both* are supplied.
+
+Full contract, deployment instructions, safety considerations and acceptance tests: [V8_BOOKING_SMS_EXPORT.md](docs/V8_BOOKING_SMS_EXPORT.md).

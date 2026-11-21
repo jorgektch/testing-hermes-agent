@@ -42,77 +42,93 @@ def test_lead_progress_and_validation():
     assert state['bp_episode']['sales_conversations']['channel'] == 'simulation'
 
 
-def test_available_slots_and_single_booking():
+def _house_offer(state):
+    from app import scheduling
+    from datetime import timedelta
+    day = scheduling.local_now().date() + timedelta(days=1)
+    # The fixtures support Monday-Saturday; avoid a Sunday for date-specific tests.
+    if day.weekday() == 6:
+        day += timedelta(days=1)
+    domain.begin_turn(state, 'I want to visit H-201. Which hours are free?')
+    domain.track_property_interest(state, 'H-201', status='interested')
+    offer = domain.slots(state, day.isoformat())
+    assert offer['ok'] and offer['available_slots'], offer
+    return offer
+
+
+def test_available_slots_and_pending_assignment():
     state = domain.blank_state()
-    offer = domain.slots(state)
-    available = offer['available_slots']
-    assert 1 <= len(available) <= 3
-    first = available[0]
-    # Searching does not reserve the appointment or create Meeting.
+    offer = _house_offer(state)
+    choice = offer['available_slots'][0]
+    assert set(choice) == {'date', 'start_time', 'timezone'}
+    assert choice['start_time'].endswith(':00')
+    assert 'advisor_name' not in str(offer)
     assert state['bp_episode']['meetings'] == []
-    assert offer['proposal_id'] == state['booking_proposal']['proposal_id']
-    unconfirmed = domain.book_visit(state, 'Alice', 'Morgan', 'alice@example.org', '+51999999999',
-                                    first['advisor_id'], first['date'], first['start_time'],
-                                    offer['proposal_id'], unit_id='H-201')
-    assert 'error' in unconfirmed
-    domain.begin_turn(state, 'Yes, please confirm that visit for me.')
+    assert 'error' in domain.book_visit(state, 'Alice', 'Morgan', 'alice@example.org', '+51999999999',
+                                       date_str=choice['date'], start_time=choice['start_time'],
+                                       proposal_id=offer['proposal_id'], unit_id='H-201')
+    domain.begin_turn(state, f'I choose {choice["start_time"]} for the H-201 visit.')
+    chosen = domain.select_visit_time(state, offer['proposal_id'], choice['date'], choice['start_time'])
+    assert chosen['ok'], chosen
+    domain.begin_turn(state, 'Yes, please confirm my visit to H-201 at this hour.')
     res = domain.book_visit(state, 'Alice', 'Morgan', 'alice@example.org', '+51999999999',
-                            first['advisor_id'], first['date'], first['start_time'],
-                            offer['proposal_id'], unit_id='H-201')
-    assert res['ok'] is True
-    assert res['booking']['visit_duration_minutes'] == 45
-    assert res['booking']['buffer_minutes'] == 15
-    assert res['booking']['simulation_only'] is True
+                            date_str=choice['date'], start_time=choice['start_time'],
+                            proposal_id=offer['proposal_id'], unit_id='H-201')
+    assert res['ok'] and res['pending_commit']
+    assert res['unit_id'] == 'H-201'
+    assert 'advisor' not in str(res).lower() or 'do not' in str(res).lower()
     assert len(state['bp_episode']['meetings']) == 1
-    meeting=state['bp_episode']['meetings'][0]
-    assert meeting['lead_id'] == state['bp_episode']['ids']['lead_id']
-    assert meeting['status']=='confirmed'
-    assert meeting['calendar_sync_status']=='simulation_ready'
+    meeting = state['bp_episode']['meetings'][0]
+    assert meeting['status'] == 'pending_assignment'
+    assert meeting['assigned_sales_user_id'] is None
+    assert meeting['visit_context']['property_association'] == 'explicit'
+    assert meeting['visit_context']['unit_code'] == 'H-201'
     assert meeting['meeting_time'].endswith('Z')
     assert len(state['bp_episode']['sales_booking_operations']) == 1
-    assert not any(s['advisor_id'] == first['advisor_id'] and s['date'] == first['date']
-                   and s['start_time'] == first['start_time']
-                   for s in domain.slots(state)['available_slots'])
-    again = domain.book_visit(state, 'Alice', 'Morgan', 'alice@example.org', '+51999999999',
-                              first['advisor_id'], first['date'], first['start_time'],
-                              offer['proposal_id'], unit_id='H-201')
-    assert 'error' in again
+    assert 'error' in domain.book_visit(state, 'Alice', 'Morgan', 'alice@example.org', '+51999999999',
+                                        date_str=choice['date'], start_time=choice['start_time'],
+                                        proposal_id=offer['proposal_id'], unit_id='H-201')
 
 
-def test_proposals_allow_general_project_visits():
-    state=domain.blank_state()
-    proposed=domain.slots(state)
-    choice=proposed['available_slots'][0]
-    domain.begin_turn(state, 'Yes, please book a visit to the project.')
-    result=domain.book_visit(state, 'Alice','Morgan','alice@example.org','+51999999999',
-                             choice['advisor_id'],choice['date'],choice['start_time'],proposed['proposal_id'])
-    assert result['ok']
-    assert state['bp_episode']['meetings'][0]['visit_unit_id'] is None
-    assert state['bp_episode']['meetings'][0]['visit_context']['property_association']=='unknown'
+def test_proposals_reject_general_project_visits():
+    from app import scheduling
+    from datetime import timedelta
+    state = domain.blank_state()
+    day = (scheduling.local_now().date() + timedelta(days=2)).isoformat()
+    assert 'error' in domain.slots(state, day)
+    assert 'error' in domain.slots(state)
+    offer = _house_offer(state)
+    choice = offer['available_slots'][0]
+    domain.begin_turn(state, 'Yes, book a general project visit, no specific house.')
+    # Contradictory unit selection fails rather than associating an arbitrary house.
+    assert 'error' in domain.book_visit(state, 'Alice', 'Morgan', 'alice@example.org', '+51999999999',
+        date_str=choice['date'], start_time=choice['start_time'],
+        proposal_id=offer['proposal_id'], unit_id='H-104')
 
 
 def test_offer_rejects_expired_or_wrong_proposal():
-    state=domain.blank_state()
-    proposal=domain.slots(state)
-    opt=proposal['available_slots'][0]
+    state = domain.blank_state()
+    offer = _house_offer(state)
+    choice = offer['available_slots'][0]
     domain.begin_turn(state,'Yes, confirm the appointment.')
-    kwargs=dict(first_name='Alice',last_name='Morgan',email='alice@example.org',
-                phone='+51999999999',advisor_id=opt['advisor_id'],
-                date_str=opt['date'],start_time=opt['start_time'],unit_id='H-201')
-    assert 'error' in domain.book_visit(state,proposal_id='fake',**kwargs)
-    state['booking_proposal']['expires_at']='2000-01-01T00:00:00+00:00'
-    assert 'expired' in domain.book_visit(state,proposal_id=proposal['proposal_id'],**kwargs)['error']
+    kwargs = dict(first_name='Alice',last_name='Morgan',email='alice@example.org',
+                  phone='+51999999999',date_str=choice['date'],
+                  start_time=choice['start_time'],unit_id='H-201')
+    assert 'error' in domain.book_visit(state, proposal_id='fake', **kwargs)
+    state['booking_proposal']['expires_at'] = '2000-01-01T00:00:00+00:00'
+    assert 'expired' in domain.book_visit(state, proposal_id=offer['proposal_id'], **kwargs)['error']
 
 
-def test_slot_spacing_is_half_hour_and_buffers_are_sixty_minutes():
+def test_slot_spacing_is_hourly_and_buffers_are_sixty_minutes():
     from app import scheduling
-    state=domain.blank_state()
-    all_slots=scheduling.available_slots(state)
-    assert all_slots
-    assert all(s['start_time'].endswith((':00',':30')) for s in all_slots)
-    assert all(s['buffer_end_time']!=s['visit_end_time'] for s in all_slots)
-    assert scheduling.policy()['visit_duration_minutes']==45
-    assert scheduling.policy()['slot_search_step_minutes']==30
+    state = domain.blank_state()
+    choices = scheduling.available_slots(state)
+    assert choices
+    assert all(x['start_time'].endswith(':00') for x in choices)
+    assert all(x['buffer_end_time'] != x['visit_end_time'] for x in choices)
+    assert scheduling.policy()['visit_duration_minutes'] == 45
+    assert scheduling.policy()['buffer_after_minutes'] == 15
+    assert scheduling.policy()['slot_search_step_minutes'] == 60
 
 
 def test_global_cross_project_busy_and_exceptions():

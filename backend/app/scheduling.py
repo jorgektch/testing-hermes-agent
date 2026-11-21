@@ -103,7 +103,7 @@ def available_slots(state: dict, *, date_filter: date | None = None, now: dateti
                     include_today: bool = False) -> list[dict]:
     """Only project-eligible advisors, global occupancy, and explicit blocked exceptions.
 
-    A search window can be every 30m even though each accepted meeting blocks 60m.
+    Visit starts align to whole clock hours; each accepted meeting blocks 60m.
     Google Calendar FreeBusy is intentionally not asserted or simulated as verified.
     """
     pol=policy(); data=availability(); today=(now or local_now()).astimezone(TZ).date()
@@ -124,7 +124,12 @@ def available_slots(state: dict, *, date_filter: date | None = None, now: dateti
             extra,blocked=_exception_intervals(user['id'],day,data,today)
             intervals+=extra
             for begin,end in intervals:
-                cursor=begin
+                # Align windows to full clock hours, including unusual 09:30 starts.
+                local_begin = begin.astimezone(TZ)
+                local_rounded = local_begin.replace(minute=0, second=0, microsecond=0)
+                if local_rounded < local_begin:
+                    local_rounded += timedelta(hours=1)
+                cursor = local_rounded.astimezone(UTC)
                 while cursor+needed<=end:
                     candidate_end=cursor+needed
                     if cursor>now_utc and not any(overlaps(cursor,candidate_end,b[0],b[1]) for b in blocked+occupied[user['id']]):
@@ -156,3 +161,28 @@ def pick_diverse_slots(choices: list[dict], count: int) -> list[dict]:
             results.append(slot)
             if len(results)>=count:return results
     return results
+
+
+def public_start_times(choices: list[dict]) -> list[dict]:
+    """Expose selectable starts but never reveal advisor identity to Hermes."""
+    by_start: dict[tuple[str, str], dict] = {}
+    for item in choices:
+        key = (item['date'], item['start_time'])
+        by_start.setdefault(key, {'date': item['date'], 'start_time': item['start_time'],
+                                  'timezone': item['timezone']})
+    return sorted(by_start.values(), key=lambda x: (x['date'], x['start_time']))
+
+
+def time_ranges(options: list[dict]) -> list[dict]:
+    """Group consecutive hourly start times into clear ranges for SMS."""
+    groups: list[list[dict]] = []
+    for item in options:
+        if (groups and item['date'] == groups[-1][-1]['date'] and
+                int(item['start_time'][:2]) == int(groups[-1][-1]['start_time'][:2]) + 1):
+            groups[-1].append(item)
+        else:
+            groups.append([item])
+    return [{'date': group[0]['date'], 'first_start': group[0]['start_time'],
+             'last_start': group[-1]['start_time'],
+             'start_times': [item['start_time'] for item in group]}
+            for group in groups]
