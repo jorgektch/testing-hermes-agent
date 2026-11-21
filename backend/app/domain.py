@@ -401,6 +401,16 @@ def end_turn(state: dict, reply: str) -> None:
     mixed = bool(re.search(r'\b(?:photos?|gallery|images?|pdf|brochure|or choose|or see)\b', reply, re.I))
     state['pending_visit_offer'] = (
         {'unit_id': candidate} if candidate and '?' in reply and invitation and not mixed else None)
+    draft=_draft(state)
+    if (draft.get('status')=='awaiting_confirmation' and
+            re.search(r'\b(?:confirm|accept|reserve|book\s+it)\b',reply,re.I) and
+            '?' in reply):
+        state['confirmation_request']={
+            'unit_id':draft['unit_id'],'date':draft['date'],
+            'start_time':draft['start_time'],
+            'proposal_id':draft.get('proposal_id'),
+            'prompt_message_id':bp['sales_messages'][-1]['id'],
+        }
 
 
 def _capture_bp_facts(state: dict, changed: dict) -> None:
@@ -997,7 +1007,7 @@ def select_visit_time(state: dict, proposal_id: str, date_str: str, start_time: 
     A model cannot silently pick among offered hours. The lead's current
     message must contain the clock time, and booking requires later consent.
     """
-    proposal = state.get('booking_proposal')
+    proposal=(state.get('booking_offers') or {}).get(proposal_id) or state.get('booking_proposal')
     if not proposal or proposal.get('status') != 'offered' or proposal.get('proposal_id') != proposal_id:
         return {'error': 'No matching active offer. Search availability again.'}
     try:
@@ -1011,6 +1021,15 @@ def select_visit_time(state: dict, proposal_id: str, date_str: str, start_time: 
                for slot in proposal['options']):
         return {'error': 'This hour was not offered.'}
     spoken = str(state.get('_active_source_message_text') or '').lower()
+    # An hour without an explicit date refers to the LAST exact date offered
+    # to the lead, not an older or merely searched proposal.
+    has_date = (parsed_day in spoken or
+        bool(re.search(r'\b(?:' + str(int(parsed_day[-2:])) +
+            r')(?:st|nd|rd|th)?\s+(?:nov|dec|jan|feb|mar|apr|may|jun|jul|aug|sep|oct)',spoken)) or
+        bool(re.search(r'\b(?:nov|dec|jan|feb|mar|apr|may|jun|jul|aug|sep|oct)\w*\s+' +
+            str(int(parsed_day[-2:])) + r'(?:st|nd|rd|th)?\b',spoken)))
+    if not has_date and state.get('last_offered_date') not in (None,parsed_day):
+        return {'error':'Selected hour must belong to the most recently offered date.'}
     hour = int(parsed_time[:2]); twelve = hour % 12 or 12
     meridian = 'am' if hour < 12 else 'pm'
     possible = (rf'\b0?{hour}:00\b',
@@ -1019,9 +1038,12 @@ def select_visit_time(state: dict, proposal_id: str, date_str: str, start_time: 
         return {'error': 'Ask the lead to explicitly choose a clock time, such as 9 AM.'}
     proposal.update(selected_start_time=parsed_time, selected_date=parsed_day,
                     selected_source_message_id=state.get('_active_source_message_id'))
-    draft = _draft(state)
+    state.setdefault('booking_offers',{})[proposal_id]=proposal
+    state['booking_proposal']=proposal
+    draft=_draft(state)
     draft.update(unit_id=proposal['selected_unit_id'], date=parsed_day,
-                 start_time=parsed_time, status='awaiting_confirmation')
+                 start_time=parsed_time,proposal_id=proposal_id,status='awaiting_confirmation')
+    state['confirmation_request']=None
     state['bp_episode']['sales_dialogue_states']['state_json']['visit_draft'] = copy.deepcopy(draft)
     record(state, 'hour_selected', f'Lead chose {parsed_day} {parsed_time} for {proposal["selected_unit_id"]}')
     return {'ok': True, 'date': parsed_day, 'start_time': parsed_time,
@@ -1279,11 +1301,72 @@ def verify_explicit_preferences(state: dict, message: str) -> dict:
 
 
 def _explicit_lead_confirmation(state: dict) -> bool:
-    """Demo-only confirmation gate; never rely on LLM-provided consent flags."""
+    """Accept a clearly affirmative answer to the exact outstanding recap.
+
+    Bare "OK", "sounds good" or a statement about other topics is NOT booking
+    consent. The buyer must have seen the complete property/date/time recap.
+    """
     text=str(state.get('_active_source_message_text') or '').strip().lower()
-    if not text or re.search(r'\b(?:not|don.t|never|cancel|no|without)\s+(?:want|confirm|book|schedule|reserve)\b',text):
+    if not text or re.search(r'\b(?:not|don.t|never|cancel|no|without)\b',text):
         return False
-    return bool(re.search(r'\b(?:yes|confirm|book|reserve|schedule|go ahead|sounds good|works for me|please do|that works|perfect)\b',text))
+    request=state.get('confirmation_request') or {}
+    draft=_draft(state)
+    if not request or any(request.get(k)!=draft.get(k) for k in ('unit_id','date','start_time')):
+        return False
+    if request.get('prompt_message_id') == state.get('_active_source_message_id'):
+        return False
+    return bool(re.fullmatch(
+        r'\s*(?:yes[\s,!.]*(?:i\s+)?(?:confirm|accept|book\s+it|please\s+book\s+it)|'
+        r'i\s+confirm|i\s+accept|confirm(?:\s+the\s+visit)?|'
+        r'please\s+(?:book|confirm|reserve)\s+(?:it|the\s+visit)|'
+        r'si[\s,!.]*(?:confirmo|acepto)|sí[\s,!.]*(?:confirmo|acepto)|'
+        r'confirmo|acepto|understood[;,.!\s]+i\s+confirm)[.!]?\s*',
+        text, flags=re.I))
+
+
+def capture_explicit_visit_time(state: dict, message: str) -> dict:
+    """Record an unambiguous hour from the latest offer, even if Hermes misses the tool."""
+    text=str(message or '').lower()
+    if re.search(r'\b(?:not|no|instead|cancel|maybe|or)\b',text):
+        return {'ok':True,'captured':False}
+    times=[]
+    for m in re.finditer(r'\b(\d{1,2})(?::(00))?\s*(am|pm)\b|\b([01]\d|2[0-3]):00\b',text,re.I):
+        if m.group(4):
+            times.append(m.group(4)+':00')
+        else:
+            hour=int(m.group(1))%12+(12 if m.group(3)=='pm' else 0)
+            times.append(f'{hour:02d}:00')
+    if len(set(times))!=1:
+        return {'ok':True,'captured':False}
+    day=state.get('last_offered_date')
+    # An explicitly specified YYYY-MM-DD may override the last offered day.
+    specified=re.search(r'\b20\d{2}-\d{2}-\d{2}\b',text)
+    if specified:day=specified.group(0)
+    if not day:
+        return {'ok':True,'captured':False}
+    offers=[o for o in (state.get('booking_offers') or {}).values()
+            if o.get('date')==day and o.get('selected_unit_id')==_draft(state).get('unit_id') and
+            o.get('status')=='offered' and
+            any(x['start_time']==times[0] for x in o.get('options',[]))]
+    if not offers:
+        candidate=state.get('booking_proposal')
+        if candidate and candidate.get('date')==day and candidate.get('status')=='offered':
+            offers=[candidate]
+    if not offers:
+        return {'ok':True,'captured':False}
+    selected=select_visit_time(state,offers[-1]['proposal_id'],day,times[0])
+    if selected.get('ok'):
+        record(state,'visit_time_captured',f'{day} {times[0]} from an explicit buyer message')
+        return {'ok':True,'captured':True,'selection':selected}
+    return {'ok':True,'captured':False,'reason':selected.get('error')}
+
+
+def ready_to_finalize_visit(state: dict) -> bool:
+    draft=_draft(state)
+    return bool(draft.get('status')=='awaiting_confirmation'
+        and draft.get('proposal_id')
+        and _explicit_lead_confirmation(state)
+        and (state.get('booking_proposal') or {}).get('proposal_id')==draft.get('proposal_id'))
 
 
 def book_visit(state: dict, first_name: str, last_name: str, email: str,
@@ -1324,7 +1407,7 @@ def book_visit(state: dict, first_name: str, last_name: str, email: str,
             proposal.get('selected_source_message_id') == state.get('_active_source_message_id')):
         return {'error': 'The lead must explicitly choose the offered hour, then confirm in a later turn.'}
     units = {u['unit_id']: u for u in read_catalog()['properties']}
-    chosen = unit_id or state['lead'].get('interest_unit_id')
+    chosen = unit_id or _draft(state).get('unit_id') or state['lead'].get('interest_unit_id')
     if not chosen or chosen not in units or chosen != proposal['selected_unit_id']:
         return {'error': 'Explicitly select one available house before confirming its visit.'}
     if _draft(state).get('unit_id') != chosen:
@@ -1400,6 +1483,7 @@ def book_visit(state: dict, first_name: str, last_name: str, email: str,
     state['booked_visits'].append(booking)
     proposal['status'] = 'pending_assignment'; proposal['meeting_id'] = meeting_id
     _draft(state)['status'] = 'pending_commit'
+    state['confirmation_request']=None
     bp['sales_dialogue_states']['state_json']['booking_proposal'] = None
     record(state, 'booking_pending', f'Awaiting transactional assignment for {chosen} {day} {start_time}')
     return {'ok': True, 'pending_commit': True, 'unit_id': chosen, 'date': day,
