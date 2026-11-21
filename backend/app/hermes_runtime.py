@@ -400,7 +400,7 @@ def _run_locked(message: str, history: list[dict], state: dict, *,
                     'tool': _name,
                     'status': ('cached_rejection' if reused else 'rejected')
                               if isinstance(outcome,dict) and outcome.get('error')
-                              else ('cached' if outcome.get('cached') else 'executed'),
+                              else ('cached' if isinstance(outcome,dict) and outcome.get('cached') else 'executed'),
                     'error_code': outcome.get('error_code') if isinstance(outcome, dict) else None,
                     'reason': str(outcome.get('error',''))[:180] if isinstance(outcome,dict) else None,
                     'next_action': str(outcome.get('next_action',''))[:180] if isinstance(outcome,dict) else None,
