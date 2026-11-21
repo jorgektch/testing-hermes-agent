@@ -4,7 +4,7 @@ import importlib.util
 from pathlib import Path
 import pytest
 
-SOURCE=Path(__file__).resolve().parents[1]/'backend/app/property_options.py'
+SOURCE=Path(__file__).resolve().parents[1]/'property_options_modified.py'
 spec=importlib.util.spec_from_file_location('test_property_options_module',SOURCE)
 options=importlib.util.module_from_spec(spec)
 spec.loader.exec_module(options)
@@ -75,12 +75,13 @@ def test_malformed_list_needs_repair_and_renders_sms_friendly_numbering():
     assert options.needs_listing_repair(bad,UNITS)
     good=options.render_matches(UNITS)
     assert good.count('\n')>=5
-    assert '\n1. H-204 -' in good
-    assert '\n2. H-101 -' in good
+    assert '\n1. H-204 (3 beds, $295k)' in good
+    assert '\n2. H-101 (3 beds, $320k)' in good
     assert good.index('H-204')<good.index('H-101')
-    assert '$295,000' in good and '$320,000' in good
-    assert 'Dec 15, 2026' in good and 'Ready now' in good
-    assert 'details' in good and 'different features' in good
+    assert '$295k' in good and '$320k' in good
+    assert 'Three-Bedroom Courtyard House' not in good  # Details come next
+    assert 'Dec 15, 2026' not in good  # Do not overload exploration
+    assert 'Which would you like to explore' in good and 'different features' in good
     assert not options.needs_listing_repair(good,UNITS)
 
 
@@ -88,8 +89,8 @@ def test_single_property_has_no_number_and_only_one_choice():
     reply=options.render_matches([UNITS[0]])
     assert '1. H-204' not in reply
     assert '2. H-101' not in reply
-    assert '\nH-204 - Three-Bedroom Courtyard House\n' in reply
-    assert 'Would you like details about H-204' in reply
+    assert '\nH-204 (3 beds, $295k)\n' in reply
+    assert 'Would you like more details' in reply
     assert not options.needs_listing_repair(reply,[UNITS[0]])
 
 
@@ -107,7 +108,7 @@ def test_order_reconstruction_is_from_text_not_internal_price_ranking():
 
 
 def test_never_offer_unmentioned_hidden_unit_as_menu_choice():
-    incomplete='1. H-204 - Three-Bedroom Courtyard House'
+    incomplete='1. H-204 (3 beds, $295k)'
     assert options.delivered_snapshot(UNITS,incomplete) is None
 
 
@@ -141,8 +142,8 @@ def test_unsupported_map_to_option_is_rejected():
 def test_three_results_number_exactly_three_and_offer_broader_filters():
     third=dict(UNITS[1],unit_id='H-104',commercial_name='Four-Bedroom Premium House',bedrooms=4,price_usd=395000)
     result=options.render_matches(UNITS+[third])
-    assert result.count('\n3. H-104 -')==1
-    assert 'option 1, 2 or 3' in result
+    assert result.count('\n3. H-104 (4 beds, $395k)')==1
+    assert 'Which would you like to explore' in result
     assert 'different features' in result
 
 
@@ -151,6 +152,26 @@ def test_menu_only_shows_first_three_when_more_matches_exist():
             dict(UNITS[1],unit_id='H-105',commercial_name='Fifth Home')]
     result=options.render_matches(UNITS+others)
     assert 'H-105' not in result
-    assert '1 more matching properties' in result
+    assert '1 more matching houses' in result
     snapshot=options.delivered_snapshot(UNITS+others,result)
     assert [x['unit_id'] for x in snapshot['options']]==['H-204','H-101','H-104']
+
+
+def test_number_only_is_selection_only_when_previous_menu_exists():
+    assert not options.is_option_selection('2')
+    assert options.is_option_selection('2',has_visible_options=True)
+    assert options.resolve_selection(state(),'2')['unit_id']=='H-101'
+    assert options.resolve_selection({},'2') is None
+
+
+def test_wrong_price_with_correct_ids_is_repaired():
+    invalid='I found two houses:\n\n1. H-204 (3 beds, $250k)\n2. H-101 (3 beds, $320k)\n\nWhich would you like to explore?'
+    assert options.needs_listing_repair(invalid,UNITS)
+    good=options.render_matches(UNITS)
+    assert good=='I found 2 3-bedroom houses:\n\n1. H-204 (3 beds, $295k)\n2. H-101 (3 beds, $320k)\n\nWhich would you like to explore? I can also look for homes with different features.'
+
+
+def test_one_match_does_not_have_selection_number():
+    one=options.render_matches([UNITS[0]])
+    assert '\n1.' not in one and '\n2.' not in one
+    assert one.count('H-204')==1

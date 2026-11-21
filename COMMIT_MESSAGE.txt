@@ -1,14 +1,10 @@
-fix(hermes): preserve numbered property selections and readable listings
+fix(hermes): integrate property option selection and compact SMS listings
 
-- Resolve option numbers, ordinals and price references against the ordered
-  catalog-backed list actually shown to the buyer.
-- Move clear selections into property details without creating a new search,
-  changing primary preferences or initiating appointment scheduling.
-- Keep the option-to-unit map with search revision and outgoing message ID in
-  persisted lead state; invalidate it when a new search replaces the menu.
-- Present one property without numbering and multiple properties as numbered,
-  multiline, SMS-friendly options with name, code, price and availability.
-- Guard both search tools against stale-H-201 recovery on an H-101 selection;
-  repair incorrect model answers using approved property facts only.
-- Preserve paragraph breaks in multipart SMS projection and document the
-  reversible exploration-to-details behavior and regression coverage.
+- Connect property_options to commercial intent classification, conversation context,
+  state transitions, delivery validation, Hermes guidance and SMS formatting.
+- Persist buyer-visible option order and move ordinal selections to property
+  details without rerunning search, changing preferences or creating visits.
+- Render compact one-property and numbered multi-property menus with genuine
+  line breaks, and repair catalog/price mismatches before delivery.
+- Add regression coverage for "The second option", bare option numbers,
+  search-session stability, message formatting and idempotent installation.

@@ -25,7 +25,7 @@ def fresh_menu():
                  "Price: $295,000 2. Three-Bedroom Family House; Price: $320,000 "
                  "Would you like to know more about either?")
     reply=delivery_policy.validate_outbound(unformatted,state)
-    assert '\n1. H-204 -' in reply and '\n2. H-101 -' in reply
+    assert '\n1. H-204 (3 beds, $295k)' in reply and '\n2. H-101 (3 beds, $320k)' in reply
     domain.end_turn(state,reply)
     return state,reply
 
@@ -67,7 +67,7 @@ def test_single_match_never_generates_option_one_label():
     result=domain.search_properties(state,{'bedrooms':2})
     assert result['ok'] and len(result['matching_properties'])==1
     actual=delivery_policy.validate_outbound('I found a 2-bedroom house H-201.',state)
-    assert '\nH-201 -' in actual
+    assert '\nH-201 (2 beds, $245k)' in actual
     assert '\n1. ' not in actual
     domain.end_turn(state,actual)
     assert state['last_presented_property_options']['options']==[
@@ -137,3 +137,31 @@ def test_selection_preserves_existing_visit_draft_but_invalidates_stale_consent(
     assert state['visit_draft']['date']=='2026-11-26'
     assert state['visit_planning_paused'] is True
     assert state['confirmation_request'] is None
+
+
+def test_bare_two_resolves_last_real_menu_and_never_creates_a_search():
+    state,_=fresh_menu()
+    sessions=len(state['search_sessions'])
+    main._begin_turn(state,'2')
+    assert state['_turn_intent']=='property_selection'
+    assert state['_turn_property_resolution']['unit_id']=='H-101'
+    assert state['conversation_phase']=='property_details'
+    assert len(state['search_sessions'])==sessions
+    assert state['visit_draft']['unit_id'] is None
+
+
+def test_exact_exported_sentence_keeps_second_option_in_details():
+    state,_=fresh_menu()
+    sessions=len(state['search_sessions'])
+    main._begin_turn(state,'The second option')
+    assert state['_turn_intent']=='property_selection'
+    assert state['_turn_property_resolution']['unit_id']=='H-101'
+    assert state['conversation_phase']=='property_details'
+    assert len(state['search_sessions'])==sessions
+    incorrect='I found 1 matching house(s): H-201 (2 beds, $245k). Which would you like to explore?'
+    answer=delivery_policy.validate_outbound(incorrect,state)
+    assert 'H-101' in answer and 'H-201' not in answer
+    domain.end_turn(state,answer)
+    assert len(state['search_sessions'])==sessions
+    assert state['conversation_phase']=='property_details'
+    assert state['last_presented_property_options']['options'][1]['unit_id']=='H-101'
