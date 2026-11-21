@@ -205,6 +205,10 @@ def update_search_preferences(state: dict, **kwargs) -> dict:
     if 'bedrooms' in result['changed_fields']:
         b=prefs['bedrooms']
         facts['bedrooms']=next(n for n in (b['preferred'],b['minimum'],b['maximum']) if n is not None)
+        state.setdefault('ui_fact_evidence',{})['min_bedrooms']={
+            'source_message_id':state.get('_active_source_message_id'),
+            'evidence':message,'captured_at':now_local().isoformat(),
+            'source':'active_conversation'}
     _capture_bp_facts(state,facts)
     state['stage']='Preferences updated'
     record(state,'preferences_updated',
@@ -1618,6 +1622,12 @@ def verify_explicit_preferences(state: dict, message: str) -> dict:
         return {'ok':True,'scope':'temporary','changed_fields':{},
                 'note':'Exploratory request. Persistent buyer preferences preserved.'}
     values = explicitly_declared_preferences(message)
+    explicit=sales_preferences.parse_declarations(message)
+    # The typed commercial parser owns bedroom preferences. Avoid writing
+    # a preliminary minimum and immediately superseding it with "preferred"
+    # from the SAME buyer message.
+    if explicit.get('bedrooms'):
+        values.pop('min_bedrooms',None)
     missing = {key: val for key, val in values.items() if state['lead'].get(key) != val}
     if missing:
         response = update_lead(state, **missing)
@@ -1630,7 +1640,6 @@ def verify_explicit_preferences(state: dict, message: str) -> dict:
         })
     else:
         response={'ok':True,'changed_fields':{}}
-    explicit=sales_preferences.parse_declarations(message)
     if explicit:
         typed={}
         for name,values in explicit.items():
