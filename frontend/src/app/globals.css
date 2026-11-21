@@ -42,3 +42,18 @@
 
 /* v8: align calendar grid with whole-hour visit starts. Legacy :30 meetings remain positioned precisely. */
 .calendar-time-row{height:60px}
+
+
+/* v11: calendar slots remain inspectable and agent work mirrors persisted tools. */
+.week-show-more{background:transparent;border:1px solid #655337;color:#e9bd68;cursor:pointer;font-size:9px;line-height:1.35;border-radius:4px;padding:5px 6px;text-align:left;margin-top:3px}
+.week-show-more:hover,.week-show-more:focus-visible{background:#3b3020;outline-color:#e9bd68}
+.agent-work{display:flex;flex-direction:column;gap:7px}
+.agent-work h3{margin-bottom:6px}
+.agent-work-row{display:flex;gap:8px;align-items:flex-start;padding:7px 9px;border:1px solid #303030;border-radius:5px;background:#1a1a1a}
+.agent-work-row>svg{flex-shrink:0;margin-top:1px}
+.agent-work-row>div{min-width:0}
+.agent-work-row strong{display:block;font-size:10px;font-weight:500;text-transform:capitalize}
+.agent-work-row small{display:block;margin-top:3px;color:var(--sub);font-size:9px;overflow-wrap:anywhere}
+.agent-work-done{color:#86c59a}
+.agent-work-error{color:#e39b8d}
+.agent-work-pending{color:#a5a5a5}
