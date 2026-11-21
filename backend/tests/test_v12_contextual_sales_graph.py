@@ -126,10 +126,12 @@ def test_looking_for_larger_area_is_a_refinement_not_confirmation():
     state=start_with_single_h201()
     domain.begin_turn(state,'I want something with more area')
     domain.verify_explicit_preferences(state,'I want something with more area')
-    minimum=state['property_filters']['min_area_sqm']
+    out=domain.search_properties(state)
+    minimum=state['active_search']['effective_filters']['min_area_sqm']
+    assert state['property_filters']['min_area_sqm'] is None
     assert 110<minimum<111
     assert state['lead']['interest_unit_id'] is None
-    result=domain.evaluate_properties(state)
+    result=out
     assert not result['matching_properties']
     assert [x['unit_id'] for x in result['optional_alternatives']]==['H-204']
 
@@ -138,16 +140,18 @@ def test_relative_cheaper_price_does_not_overwrite_declared_budget():
     state=start_with_single_h201()
     domain.begin_turn(state,'Do you have anything cheaper?')
     domain.verify_explicit_preferences(state,'Do you have anything cheaper?')
-    filters=state['property_filters']
-    assert filters['relative_price_lt']==245000
+    result=domain.search_properties(state)
+    assert state['active_search']['effective_filters']['relative_price_lt']==245000
+    assert state['property_filters']['relative_price_lt'] is None
     assert state['search_preferences']['budget']['maximum_usd']==300000
-    assert not domain.evaluate_properties(state)['matching_properties']
+    assert not result['matching_properties']
 
 
 def test_new_explicit_budget_can_supersede_relative_price_filter():
     state=start_with_single_h201()
     domain.begin_turn(state,'Anything cheaper?')
     domain.verify_explicit_preferences(state,'Anything cheaper?')
+    assert domain.search_properties(state)['ok']
     domain.end_turn(state,'No matching house below the H-201 asking price.')
     domain.begin_turn(state,'Actually I can go up to $320k')
     domain.verify_explicit_preferences(state,'Actually I can go up to $320k')
