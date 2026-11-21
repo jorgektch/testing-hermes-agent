@@ -21,7 +21,10 @@ def test_registered_hermes_tools_emit_observations_without_replacing_agent(monke
             assert kwargs['skip_memory'] is True
             assert kwargs['save_trajectories'] is False
             self.valid_tool_names = list(registry.handlers)
-        def run_conversation(self, message, conversation_history):
+        def run_conversation(self, message, conversation_history, persist_user_message=None):
+            assert persist_user_message == "I'm looking for a 2-bedroom house"
+            assert 'CURRENT BUYER MESSAGE' in message
+            assert "I'm looking for a 2-bedroom house" in message
             assert conversation_history == []
             output = json.loads(registry.handlers['update_lead_profile'](
                 {'property_type': 'House', 'min_bedrooms': 2}))
@@ -49,7 +52,7 @@ def test_registered_hermes_tools_emit_observations_without_replacing_agent(monke
     outcome = hermes_runtime.chat("I'm looking for a 2-bedroom house", [], state,
                                   on_tool_state=notifications.append)
     assert outcome['reply'].startswith('I can help')
-    assert len(registry.handlers) == 14
+    assert len(registry.handlers) == 15
     assert notifications and notifications[0]['tool'] == 'update_lead_profile'
     assert notifications[0]['profile']['lead']['min_bedrooms'] == 2
     assert state['tool_observations'][-1]['message_id'] == state['_active_source_message_id']
