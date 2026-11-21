@@ -81,7 +81,12 @@ def blank_state() -> dict:
         },
         'stage': 'New Meta lead',
         'shortlisted_unit_ids': [],
-        'exploring_unit_id': None,  # discussed house, not a visit commitment
+        'exploring_unit_id': None,  # legacy UI projection
+        'conversation_focus': {'project_id': bp['ids']['project_id'],
+                               'unit_id': None, 'ambiguous': False,
+                               'source_message_id': None},
+        'visit_draft': {'unit_id': None, 'date': None, 'start_time': None, 'status': 'idle'},
+        'last_slot_search': None,
         'booked_visits': [],
         'booking_proposal': None,
         'property_interests': [],
@@ -91,6 +96,141 @@ def blank_state() -> dict:
         'turn_count': 0,
         'bp_episode': bp,
     }
+
+
+
+def _units_by_code() -> dict[str, dict]:
+    return {u['unit_id']: u for u in read_catalog()['properties']}
+
+
+def _focus(state: dict) -> dict:
+    """Restore the explicit topic scope for historical lead states."""
+    focus = state.setdefault('conversation_focus', {
+        'project_id': state['bp_episode']['ids']['project_id'],
+        'unit_id': state.get('exploring_unit_id'), 'ambiguous': False,
+        'source_message_id': None,
+    })
+    focus.setdefault('project_id', state['bp_episode']['ids']['project_id'])
+    focus.setdefault('unit_id', state.get('exploring_unit_id'))
+    focus.setdefault('ambiguous', False)
+    return focus
+
+
+def _draft(state: dict) -> dict:
+    """Migrate an older saved appointment offer without changing the appointment."""
+    if 'visit_draft' not in state:
+        proposal = state.get('booking_proposal') or {}
+        code = proposal.get('selected_unit_id')
+        if code in _units_by_code():
+            state['visit_draft'] = {
+                'unit_id': code, 'date': proposal.get('selected_date') or proposal.get('date'),
+                'start_time': proposal.get('selected_start_time'),
+                'status': ('confirmed' if proposal.get('status') == 'confirmed' else
+                           'awaiting_confirmation' if proposal.get('selected_start_time') else 'hour_needed')}
+        else:
+            state['visit_draft'] = {'unit_id': None, 'date': None, 'start_time': None, 'status': 'idle'}
+    return state['visit_draft']
+
+
+def _set_focus(state: dict, code: str, source_message_id: str | None = None) -> None:
+    unit = _units_by_code().get(code)
+    if not unit:
+        return
+    focus = _focus(state)
+    focus.update(project_id=state['bp_episode']['ids']['project_id'],
+                 unit_id=code, ambiguous=False,
+                 source_message_id=source_message_id or state.get('_active_source_message_id'))
+    state['exploring_unit_id'] = code
+    bp = state['bp_episode']
+    bp['ids']['unit_id'] = unit['blackpenguin_unit_id']
+    bp['ids']['property_type_id'] = unit['property_type_id']
+    dialogue = bp['sales_dialogue_states']['state_json']
+    dialogue['selected_unit_id'] = unit['blackpenguin_unit_id']
+    dialogue['selected_property_type_id'] = unit['property_type_id']
+    dialogue['conversation_focus'] = copy.deepcopy(focus)
+
+
+def _set_visit_unit(state: dict, code: str) -> None:
+    if code not in _units_by_code():
+        return
+    draft = _draft(state)
+    if draft.get('unit_id') != code:
+        draft.update(unit_id=code, date=None, start_time=None, status='day_needed')
+        proposal = state.get('booking_proposal')
+        if proposal and proposal.get('selected_unit_id') != code and proposal.get('status') == 'offered':
+            state['booking_proposal'] = None
+            state['bp_episode']['sales_dialogue_states']['state_json']['booking_proposal'] = None
+    elif draft.get('status') == 'idle':
+        draft['status'] = 'day_needed'
+    state['bp_episode']['sales_dialogue_states']['state_json']['visit_draft'] = copy.deepcopy(draft)
+
+
+def _observe_inbound_context(state: dict, message: str) -> None:
+    """Track explicitly discussed houses; never treat a question as booking consent."""
+    known = _units_by_code()
+    mentioned = list(dict.fromkeys(code.upper() for code in re.findall(
+        r'(?<![A-Z0-9])H-\d{3}(?![A-Z0-9])', message.upper()) if code.upper() in known))
+    focus = _focus(state)
+    if len(mentioned) == 1:
+        _set_focus(state, mentioned[0])
+    elif len(mentioned) > 1:
+        focus['ambiguous'] = True
+        state['bp_episode']['sales_dialogue_states']['state_json']['conversation_focus'] = copy.deepcopy(focus)
+    visit_intent = bool(re.search(
+        r'\b(?:visit|tour|book|schedule|appointment|slots|visit times|which hours|what times|see in person|view in person)\b',
+        message, flags=re.I))
+    negated = bool(re.search(r"\b(?:don['’]?t|do not|not|cancel|without)\s+"
+                             r"(?:want to )?(?:visit|tour|book|schedule)\b", message, flags=re.I))
+    affirmative = bool(re.fullmatch(
+        r'\s*(?:yes|yes please|sure|please do|that works|sounds good|ok|okay)[.!]?\s*',
+        message, flags=re.I))
+    offer = state.pop('pending_visit_offer', None)
+    if affirmative and offer and not mentioned and offer.get('unit_id') in known:
+        _set_visit_unit(state, offer['unit_id'])
+        return
+    existing_visit_reference = bool(re.search(
+        r'\b(?:confirm|go ahead|proceed|finalize|reschedule|cancel)\b|'
+        r'\b(?:my|our|the)\s+appointment\b|\bthe visit we discussed\b',
+        message, flags=re.I))
+    if existing_visit_reference and not mentioned and _draft(state).get('unit_id'):
+        return
+    if visit_intent and not negated:
+        target = mentioned[0] if len(mentioned) == 1 else (
+            focus.get('unit_id') if not mentioned and not focus.get('ambiguous') else None)
+        if target:
+            _set_visit_unit(state, target)
+
+
+def _slot_error(code: str, message: str, unit_id: str | None = None,
+                *, next_action: str, **details) -> dict:
+    return {'ok': False, 'error_code': code, 'error': message,
+            'unit_id': unit_id, 'next_action': next_action, **details}
+
+
+def _time_matches(clock: str, preference: str | None) -> bool:
+    hour = int(clock[:2])
+    return (preference in (None, '', 'any') or
+            (preference == 'morning' and hour < 12) or
+            (preference == 'afternoon' and 12 <= hour < 17) or
+            (preference == 'evening' and hour >= 17))
+
+
+def _relative_range(raw: str, today: date) -> tuple[date, date] | None:
+    value = str(raw).strip().lower()
+    if value in ('next week', 'the next week'):
+        monday = today + timedelta(days=7-today.weekday())
+        return monday, monday + timedelta(days=6)
+    if value in ('this week', 'later this week'):
+        return today + timedelta(days=1), today + timedelta(days=6-today.weekday())
+    if value in ('this weekend', 'the weekend'):
+        saturday = today + timedelta(days=(5-today.weekday()) % 7)
+        if saturday <= today:
+            saturday += timedelta(days=7)
+        return saturday, saturday + timedelta(days=1)
+    if value == 'next weekend':
+        saturday = today + timedelta(days=(5-today.weekday()) % 7 + 7)
+        return saturday, saturday + timedelta(days=1)
+    return None
 
 
 def record(state: dict, event: str, label: str) -> None:
@@ -107,6 +247,7 @@ def begin_turn(state: dict, message: str) -> None:
     mid = str(uuid.uuid4())
     state['_active_source_message_id'] = mid
     state['_active_source_message_text'] = message
+    _observe_inbound_context(state, message)
     bp['sales_messages'].append({
         'id': mid, 'conversation_id': bp['ids']['conversation_id'],
         'role': 'user', 'direction': 'inbound', 'channel': 'simulation',
@@ -148,6 +289,15 @@ def end_turn(state: dict, reply: str) -> None:
     state.pop('_approved_media_urls_this_turn', None)
     state.pop('_matching_options_this_turn', None)
     state.pop('_details_for_current_turn', None)
+    state.pop('_slot_queries_this_turn', None)
+    mentioned = list(dict.fromkeys(code.upper() for code in re.findall(
+        r'(?<![A-Z0-9])H-\d{3}(?![A-Z0-9])', reply.upper())))
+    candidate = (mentioned[0] if len(mentioned) == 1 else
+                 _focus(state).get('unit_id') if not mentioned else None)
+    invitation = bool(re.search(r'\b(?:visit|tour|schedule|appointment)\b', reply, re.I))
+    mixed = bool(re.search(r'\b(?:photos?|gallery|images?|pdf|brochure|or choose|or see)\b', reply, re.I))
+    state['pending_visit_offer'] = (
+        {'unit_id': candidate} if candidate and '?' in reply and invitation and not mixed else None)
 
 
 def _capture_bp_facts(state: dict, changed: dict) -> None:
@@ -420,7 +570,7 @@ def unit_details(state: dict, unit_id: str) -> dict:
     selected = state['lead'].get('interest_unit_id') == unit['unit_id']
     if state.get('_active_source_message_id') and not _buyer_mentioned_house(state, unit['unit_id']) and not (focused or selected):
         return {'error': 'Ask which house the buyer wants to explore before loading details.'}
-    state['exploring_unit_id'] = unit['unit_id']
+    _set_focus(state, unit['unit_id'])
     return {'ok': True, 'unit_id': unit['unit_id'],
             'commercial_name': unit['commercial_name'],
             'property_type': unit['property_type'],
@@ -429,6 +579,7 @@ def unit_details(state: dict, unit_id: str) -> dict:
             'area_sqm': unit.get('area_sqm'), 'lot_area_m2': unit.get('lot_area_m2'),
             'confirmed_features': unit.get('confirmed_features', {}),
             'highlights': unit.get('highlights', []),
+            'location': unit.get('location'),
             'status': unit['status'], 'available_from_date': unit['available_from_date'],
             'note': 'Verified information for this house only. Media require separate buyer request.'}
 
@@ -593,7 +744,7 @@ def track_property_interest(state: dict, unit_id: str, status: str = 'discussed'
         words = str(state.get('_active_source_message_text') or '').lower()
         # Merely asking for information or photos is NOT visit intent.
         visit_intent = re.search(r'\b(visit|tour|book|schedule|see in person|appointment|choose|select|pick|want|interested|like|prefer)\b', words)
-        if not visit_intent and state['lead'].get('interest_unit_id') != unit_id:
+        if not visit_intent and _draft(state).get('unit_id') != unit_id and state['lead'].get('interest_unit_id') != unit_id:
             return {'error': 'Asking about a house is not permission to select it for a visit.'}
     existing = state.setdefault('property_interests', [])
     # A mention cannot downgrade a prior explicit interest.
@@ -608,7 +759,11 @@ def track_property_interest(state: dict, unit_id: str, status: str = 'discussed'
     if status == 'interested':
         state['lead']['interest_unit_id'] = unit_id
     if _buyer_mentioned_house(state, unit_id) or status == 'interested':
-        state['exploring_unit_id'] = unit_id
+        _set_focus(state, unit_id)
+    if status == 'interested' and re.search(
+            r'\b(?:visit|tour|book|schedule|appointment|see in person)\b',
+            str(state.get('_active_source_message_text') or ''), flags=re.I):
+        _set_visit_unit(state, unit_id)
     return {'ok': True, 'property_interests': existing,
             'active_unit_id': state['lead'].get('interest_unit_id')}
 
@@ -658,7 +813,10 @@ def update_lead(state: dict, **kwargs: Any) -> dict:
                 return {'error': f'Unknown available unit: {value}'}
             if state.get('_active_source_message_id') and value != lead.get('interest_unit_id'):
                 spoken = str(state.get('_active_source_message_text') or '').lower()
-                if not _buyer_mentioned_house(state, str(value)) or not re.search(
+                contextual = (_focus(state).get('unit_id') == value and
+                              not _focus(state).get('ambiguous') and
+                              not any(code.lower() in spoken for code in _units_by_code() if code != value))
+                if not (_buyer_mentioned_house(state, str(value)) or contextual) or not re.search(
                         r'\b(visit|tour|book|schedule|see in person|appointment|choose|select|pick|want|interested|like|prefer)\b', spoken):
                     return {'error': 'A question about a house is not explicit visit selection.'}
         if key == 'budget_currency':
@@ -705,6 +863,8 @@ def update_lead(state: dict, **kwargs: Any) -> dict:
                     del merged[alias]
             merged[field]=value
         _capture_bp_facts(state, merged)
+        if changed.get('interest_unit_id'):
+            _set_focus(state, changed['interest_unit_id'])
         if lead.get('budget_usd') and lead.get('purchase_timeframe'):
             state['stage']='Qualified lead'
         if lead.get('interest_unit_id'):
