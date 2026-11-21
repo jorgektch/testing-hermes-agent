@@ -43,6 +43,71 @@ def _matching_reply(matches: list[dict], alternatives: list[dict] | None = None)
     return f'I found {len(matches)} matching house(s). Which one would you like to explore?'
 
 
+
+def _no_matches_for_state(state: dict) -> str:
+    """Catalog-grounded commercial reply; hard buyer limits stay unchanged."""
+    prefs=(state.get('active_search') or {}).get('effective_preferences') or state.get('search_preferences') or {}
+    budget=prefs.get('budget') or {}
+    bedrooms=prefs.get('bedrooms') or {}
+    cap=budget.get('maximum_usd')
+    beds=bedrooms.get('preferred') or bedrooms.get('minimum')
+    requested=(f'{beds}-bedroom house' if beds else 'house')
+    scope=(f' within your \${int(cap):,} budget' if cap is not None else
+           ' matching those preferences')
+    intro=f"We don't currently have a {requested}{scope}."
+    ranked=state.get('_search_out_of_budget_this_turn') or []
+    ranked=sorted(ranked,key=lambda u:(
+        int(beds is not None and u['bedrooms']!=beds),
+        int(u.get('exceeds_budget_by_usd') or 0),
+        int(u['price_usd']),u['unit_id']))
+    if cap is not None and ranked:
+        alternative=ranked[0]
+        delta=int(alternative['price_usd'])-int(cap)
+        if delta>0:
+            other_beds=(f'{alternative["bedrooms"]}-bedroom ' if
+                        beds and alternative['bedrooms']!=beds else '')
+            return (f'{intro} The lowest-priced {other_beds}alternative is '
+                    f'{alternative["unit_id"]} at \${int(alternative["price_usd"]):,}, '
+                    f'\${delta:,} above your limit. '
+                    'Would you like to see it as an alternative, or keep your budget unchanged?')
+    return intro+' Would you like to adjust a criterion?'
+
+
+_TECHNICAL_REPLY=re.compile(
+    r'\b(?:system (?:requires|issue|error)|technical (?:issue|difficulty|error)|'
+    r'(?:difficulty|trouble|problem) (?:retrieving|accessing|fetching)|'
+    r'unable to (?:retrieve|access|fetch) (?:properties|inventory)|'
+    r'constraints for filtering|try(?:ing)? (?:the )?search again|'
+    r'confirm that you want to keep the preference|'
+    r'(?:internal|validation|tool|backend) error)\b',re.I)
+
+
+def _search_answer_needs_repair(plain: str, state: dict, matches: list[dict]) -> bool:
+    if _TECHNICAL_REPLY.search(plain):
+        return True
+    codes={c.upper() for c in re.findall(r'\bH-\d+\b',plain,re.I)}
+    valid={u['unit_id'] for u in matches}
+    extras=set(state.get('_allowed_alternative_units_this_turn') or [])
+    closest=state.get('_search_nearest_out_of_budget_this_turn') or {}
+    if not matches and closest.get('unit_id'):
+        extras.add(closest['unit_id'])
+    if codes-valid-extras:
+        return True
+    if not matches:
+        if not re.search(
+            r'\b(?:no (?:houses?|homes?|properties|matches|listings|options)|'
+            r"don.t (?:currently )?have|do not (?:currently )?have|"
+            r"couldn.t find|cannot find|can't find|none (?:meet|match)|"
+            r'not (?:currently )?available)\b',plain,re.I):
+            return True
+        if codes.intersection(extras) and not re.search(
+            r'\b(?:above|over|exceeds|outside|alternative|more than|higher)\b',
+            plain,re.I):
+            return True
+    return False
+
+
+
 def _pending_visit_recap(state: dict) -> str:
     draft=state.get('visit_draft') or {}
     name=draft.get('unit_id') or 'the selected house'
