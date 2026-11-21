@@ -45,7 +45,7 @@ def test_matching_is_compact_has_no_media_and_preserves_ranking():
     domain.update_lead(state, budget_usd=300000, min_bedrooms=2, property_type='House')
     res = domain.evaluate_properties(state, 300000, min_bedrooms=2)
     assert [u['unit_id'] for u in res['matching_properties']] == ['H-201','H-204']
-    assert res['next_action'].startswith('Offer a brief list')
+    assert res['next_action'].startswith('Present only actual matching houses')
     for unit in res['matching_properties'] + res['out_of_budget_properties']:
         assert 'media' not in unit and 'gallery_urls' not in unit
         assert 'confirmed_features' not in unit and 'highlights' not in unit
