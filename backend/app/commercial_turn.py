@@ -20,7 +20,7 @@ _SEARCH=re.compile(
     r'which (?:houses|homes|properties)|compare)\b',
     re.I)
 _REVISE=re.compile(
-    r'\b(?:actually|from now on|instead|i changed my mind|my new|'
+    r'\b(?:(?:actually[, ]+i (?:prefer|want|need))|from now on|i changed my mind|my new|'
     r'i now (?:want|need|prefer)|now i (?:want|need|prefer)|'
     r'i no longer|no longer want|'
     r'my (?:maximum|max|minimum|min|budget) (?:is|will be)|'
