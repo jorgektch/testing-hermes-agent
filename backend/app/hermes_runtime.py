@@ -41,7 +41,24 @@ Lead identity was already registered by the administrator; do not ask for name, 
 advisors or bookings are real. Never invent data, prices, links or inventory. Use the approved synthetic demo catalog only. There is a reserved unit that must never be proposed as available.
 
 MANDATORY LIVE STRUCTURED STATE:
-- When the lead mentions a known unit, call track_property_interest with status=discussed; use status=interested only when explicit.
+- Treat the sale as a NONLINEAR graph: discovery <-> comparisons <-> public
+  property details <-> visit date/hour exploration <-> optional return to search.
+  Do not force the buyer through qualification again when returning to details.
+- When one house was just offered, subsequent "it", "that one", "its area",
+  "square footage", or "Yes" to an exploration question refer to that house.
+  Public price, area, layout, bathrooms and approved factual features require
+  NO buyer-interest confirmation. Call get_unit_details with no unit_id if the
+  backend has already resolved the single contextual reference.
+- When the backend supplies a resolved_unit_id after an error, use it once
+  instead of asking for reconfirmation. NEVER repeat the exact same rejected
+  tool call in a turn. Only ask for clarification when references truly
+  contain multiple possible houses.
+- Do not claim a system issue merely because a tool rejected an incorrect
+  house reference. Repair by reading the server-validated current property.
+- - Optionally call track_property_interest when a buyer actually discusses or
+  explicitly prefers a house; it is NOT a precondition for public details.
+  Status=interested requires a buyer's explicit preference/intent, not a
+  generic question about an area. Never use it as a permission handshake.
 - Backend conversation_focus tracks the current house being discussed; visit_draft separately tracks the explicit house/day/hour of an appointment. Never confuse the two.
 - "It", "that house" and "this property" refer to the ONE unambiguous focused house. Do not ask for an already known property code.
 - When discussing a different house, answer the new question without redirecting an outstanding visit. Only a new explicit visit request changes visit_draft.
@@ -56,6 +73,20 @@ MANDATORY LIVE STRUCTURED STATE:
 - You may update partial fields; the dashboard shows progress after each turn.
 
 SALES WORKFLOW:
+- Respond to the current question FIRST. There is no fixed linear funnel.
+  A buyer may revise all filters together or one at a time, return from visit
+  planning to comparison, or explore another property without cancelling a
+  pending visit. The visit draft is NEVER changed by a mere side question.
+- A partial qualification is enough to search; do not demand budget, purchase
+  timeline or a formal property selection before answering available facts.
+- For larger-area, cheaper, fewer-bedrooms or more-expensive comparisons use
+  the typed property_filters returned by the backend; distinguish strict
+  limits from softer bedroom preferences. If no exact match exists, say so.
+- Remember per-property answered_topics and shared_media. If the buyer asks
+  for a gallery or PDF already sent, say "I'm resending..." and include the
+  verified URL again. No invented files, floor plans or house locations.
+- Subtly identify the property during visit date/hour discussions, e.g.
+  "For H-204, would Tuesday at 3 PM work?", without repeating qualification.
 1. The lead has already received the welcome text mentioning THIS project. Do NOT restart the conversation or greet again.
    Respond directly to the lead's latest statement and ask only what is missing.
 2. Naturally qualify approximate budget and estimated purchase timeframe,
@@ -65,7 +96,8 @@ SALES WORKFLOW:
    ONLY short, ranked summaries: house ID, price, bedrooms and availability. Present
    no more than three matching options, ONE concise line each, then ask the buyer
    which ONE to explore. No full descriptions, bathrooms, features, links or PDFs yet.
-   Only call get_unit_details AFTER the lead chooses or asks about a particular house;
+   Call get_unit_details when the lead asks about the ONE house in conversational
+   focus, including follow-up questions without a repeated unit ID;
    offer brief details of that ONE house. Never assume a matching house is selected
    for a visit. Pass any
    explicitly stated REQUIRED typed features as filters; never invent unknown values.
@@ -188,19 +220,19 @@ SCHEMAS: dict[str, dict] = {
         'description': 'Get verified price, size, amenities and availability for ONE house the buyer explicitly asks about. Does not return media links.',
         'parameters': {'type': 'object', 'properties': {
             'unit_id': {'type':'string', 'description': 'One published house code.'},
-        }, 'required':['unit_id'], 'additionalProperties':False},
+        }, 'additionalProperties':False},
     },
     'list_unit_assets': {
         'description': 'Discover approved photos, brochures, floor plans and other PDFs for the ONE focused property WITHOUT sending links. Useful before answering whether a requested PDF exists.',
         'parameters': {'type':'object','properties':{
             'unit_id':{'type':'string'},
-        },'required':['unit_id'],'additionalProperties':False},
+        },'additionalProperties':False},
     },
     'get_unit_media': {
         'description': 'Send ONLY explicitly requested approved gallery/PDF URLs for the focused house; return metadata on OTHER available assets but no unsolicited additional URLs. Never relabel a fact sheet as a floor plan.',
         'parameters': {'type': 'object', 'properties': {
             'unit_id': {'type': 'string', 'description': 'Known residential unit ID.'},
-        }, 'required': ['unit_id']},
+        }, 'additionalProperties':False},
     },
     'get_available_visit_slots': {
         'description': 'Search anonymous visit availability for a previously requested house. Exact dates create expiring offers; broad periods return available days, never booked hours. Never repeat an identical failed query.',
@@ -294,7 +326,8 @@ def _run_locked(message: str, history: list[dict], state: dict, *,
         text=str(state.get('_active_source_message_text') or '').lower()
         photos=bool(re.search(r'\b(?:photo|photos|picture|pictures|image|images|gallery)\b',text))
         docs=bool(re.search(r'\b(?:pdf|brochures?|fact.?sheets?|floor.?plans?|plans?|documents?)\b',text))
-        unit_id=args.get('unit_id','')
+        resolution=state.get('_turn_property_resolution') or {}
+        unit_id=args.get('unit_id') or resolution.get('unit_id')
         prior=state.get('pending_media_offer') or {}
         if (not (photos or docs) and unit_id==prior.get('unit_id') and
                 re.fullmatch(r'\s*(?:yes|yes please|sure|please|send it|that would be great)[.!]?\s*',text)):
@@ -312,6 +345,7 @@ def _run_locked(message: str, history: list[dict], state: dict, *,
         discovery=domain.list_unit_assets(state,unit_id)
         if discovery.get('error'):
             return discovery
+        previous=(state.get('shared_media') or {}).get(unit_id) or {}
         result={'ok':True,'unit_id':unit_id,
                 'other_available':discovery,
                 'note':'Offer additional approved assets by name, not by unsolicited link.'}
@@ -328,6 +362,9 @@ def _run_locked(message: str, history: list[dict], state: dict, *,
                 types={'brochure','floor_plan','document','fact_sheet'}
             matched=[d for d in media['documents'] if d.get('type') in types]
             result['documents']=matched
+            result['document_resend']=any(
+                d['url'] in set(previous.get('document_urls_sent') or [])
+                for d in matched)
             result['requested_documents_available']=bool(matched)
             if not matched:
                 result['unavailable_requested_type']='floor_plan' if floor else 'brochure' if brochure else 'pdf'
@@ -335,6 +372,7 @@ def _run_locked(message: str, history: list[dict], state: dict, *,
         if photos:
             result['gallery_url']=media['gallery_url']
             result['gallery_available']=bool(media['gallery_url'])
+            result['gallery_resend']=bool(previous.get('gallery_sent'))
             if media['gallery_url']:
                 approved.append(media['gallery_url'])
         return result
@@ -356,10 +394,26 @@ def _run_locked(message: str, history: list[dict], state: dict, *,
     }
     for name, func in funcs.items():
         def handler(args: dict, _func=func, _name=name, **_kwargs: Any) -> str:
-            try:
-                outcome = _func(args)
-            except (ValueError, TypeError, KeyError) as exc:
-                outcome = {'error': str(exc)}
+            # Keep repeated identical errors from causing a Hermes "confirm
+            # again" loop. Cache rejects within this inbound turn only.
+            cache=state.setdefault('_tool_rejection_cache',{})
+            key=json.dumps([_name,args],sort_keys=True,default=str)
+            if key in cache:
+                outcome=dict(cache[key])
+                outcome['already_checked']=True
+                outcome['next_action']=outcome.get('next_action') or (
+                    'Do not repeat this tool call. Resolve the property from '
+                    'conversation context or answer from an existing verified fact.')
+            else:
+                try:
+                    outcome = _func(args)
+                except (ValueError, TypeError, KeyError) as exc:
+                    outcome = {'error':str(exc),'error_code':'TOOL_ARGUMENT_INVALID',
+                               'next_action':'Correct tool inputs without asking for redundant consent.'}
+                if isinstance(outcome,dict) and outcome.get('error'):
+                    outcome.setdefault('error_code','DOMAIN_VALIDATION_REJECTED')
+                    outcome.setdefault('next_action','Use the structured context to recover.')
+                    cache[key]=dict(outcome)
             if _name == 'evaluate_properties_for_lead' and isinstance(outcome, dict) and outcome.get('ok'):
                 state['_matching_options_this_turn'] = outcome.get('matching_properties', [])
             if _name == 'get_unit_details' and isinstance(outcome, dict) and outcome.get('ok'):
@@ -372,6 +426,8 @@ def _run_locked(message: str, history: list[dict], state: dict, *,
                     'tool': _name,
                     'status': 'rejected' if isinstance(outcome, dict) and outcome.get('error') else 'executed',
                     'error_code': outcome.get('error_code') if isinstance(outcome, dict) else None,
+                    'reason': str(outcome.get('error',''))[:180] if isinstance(outcome,dict) else None,
+                    'next_action': str(outcome.get('next_action',''))[:180] if isinstance(outcome,dict) else None,
                     'fields': sorted(k for k in args if k != 'advisor_id'),
                     'message_id': state.get('_active_source_message_id'),
                     'timestamp': domain.now_local().isoformat(timespec='seconds'),
@@ -403,6 +459,13 @@ def _run_locked(message: str, history: list[dict], state: dict, *,
                             + json.dumps({
                                 'conversation_focus': state.get('conversation_focus'),
                                 'search_preferences': state.get('search_preferences'),
+                                'property_filters':state.get('property_filters'),
+                                'resolved_property':state.get('_turn_property_resolution'),
+                                'last_presented_units':state.get('last_presented_units',[]),
+                                'last_assistant_reply':state.get('last_assistant_reply'),
+                                'recent_answered_topics':state.get('answered_topics',[])[-8:],
+                                'shared_media':state.get('shared_media'),
+                                'current_factual_details':state.get('_details_for_current_turn'),
                                 'confirmation_request': state.get('confirmation_request'),
                                 'last_offered_date': state.get('last_offered_date'),
                                 'visit_draft': state.get('visit_draft'),
