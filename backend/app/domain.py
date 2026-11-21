@@ -401,6 +401,8 @@ def end_turn(state: dict, reply: str) -> None:
     state.pop('_matching_options_this_turn', None)
     state.pop('_details_for_current_turn', None)
     state.pop('_slot_queries_this_turn', None)
+    state.pop('_booking_completion_error', None)
+    state.pop('_allowed_alternative_units_this_turn', None)
     mentioned = list(dict.fromkeys(code.upper() for code in re.findall(
         r'(?<![A-Z0-9])H-\d{3}(?![A-Z0-9])', reply.upper())))
     candidate = (mentioned[0] if len(mentioned) == 1 else
