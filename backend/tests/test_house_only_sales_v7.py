@@ -58,7 +58,7 @@ def test_server_enforces_existing_lead_budget_even_with_agent_overshoot():
     domain.update_lead(state, budget_usd=250000, min_bedrooms=2, property_type='House')
     results=domain.evaluate_properties(state, 500000, min_bedrooms=2)
     assert [x['unit_id'] for x in results['matching_properties']] == ['H-201']
-    assert results['applied_criteria']['max_budget_usd'] == 250000
+    assert results['applied_criteria']['budget']['maximum_usd'] == 250000
     assert all(x['price_usd']<=250000 for x in results['matching_properties'])
 
 
