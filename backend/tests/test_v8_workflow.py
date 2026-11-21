@@ -117,7 +117,7 @@ def test_round_robin_3_and_no_fourth_double_booking(store):
         lead, offer, state = offer_one(lead, day)
         lead, state, pending = select_and_book(lead, offer, state)
         saved = db.save_turn(AUTH, lead['id'], lead['revision'], state, [],
-                             'Yes, please confirm the H-201 visit.', 'I have submitted your request.')
+                             'Yes, I confirm', 'I have submitted your request.')
         visit = saved['state']['booked_visits'][-1]
         assert visit['status'] == 'confirmed' and visit['unit_id'] == 'H-201'
         assert visit['advisor_name'] and visit['advisor_id']
@@ -137,7 +137,7 @@ def test_round_robin_3_and_no_fourth_double_booking(store):
     fourth, state, _ = select_and_book(fourth, offer, state)
     with pytest.raises(db.Conflict, match='no longer available|became unavailable'):
         db.save_turn(AUTH, fourth['id'], fourth['revision'], state, [],
-                     'Yes, please confirm the H-201 visit.', 'I have submitted your request.')
+                     'Yes, I confirm', 'I have submitted your request.')
     with db.database() as con:
         assert con.execute('SELECT COUNT(*) FROM meetings WHERE lead_id=?', (fourth['id'],)).fetchone()[0] == 0
 
