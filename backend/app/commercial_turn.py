@@ -76,6 +76,17 @@ def scope(message: str, has_primary: bool) -> str:
         return 'permanent'
     if search_request(message) and has_primary:
         return 'temporary'
+    # Unambiguous direct declarations about the buyer's own budget are not
+    # a comparison, even if a bedroom preference was captured earlier.
+    if re.search(
+            r"\b(?:i (?:do not|don't|dont) want to spend more than|"
+            r"my budget is|my budget (?:will be|should be)|"
+            r"my (?:maximum|max|minimum|min) (?:budget )?is|"
+            r"i (?:only )?have (?:exactly )?\$?|"
+            r"i can (?:afford|spend|pay)|"
+            r"my spending limit is)\b",message,re.I) and re.search(
+                r"\$|\b\d[\d,]*(?:k|m|000)\b",message,re.I):
+        return 'permanent'
     return 'permanent' if not has_primary else 'temporary'
 
 
