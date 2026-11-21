@@ -28,6 +28,75 @@ A **single-screen evaluation workspace** for [Nous Research Hermes Agent](https:
 - **Source of truth:** edit `shared/blackpenguin/{project,property_types,units,assets}.json`, run `python scripts/build_catalog_from_blackpenguin.py`, then `python scripts/generate_demo_assets.py` (requires `reportlab` installed). Do **not** manually edit generated `shared/catalog.json` or `backend/app/catalog.json`.
 - **Media:** `/properties/H-201/gallery` and equivalent URLs aggregate only the given unit's images. A PDF in a unit card is a synthetic *fact sheet*, not a licensed construction plan or project-level brochure. Retired apartment asset files are retained on disk only to avoid breaking previously shared historical links, but are not in the public catalog.
 
+## v13 — Agent-Native Commercial Orchestration
+
+Hermes remains the conversational agent, while our tools own verifiable business
+data and transactions. The real upstream Nous Research Hermes \`AIAgent\`
+remains pinned to \`b94cb8e2c4ebf2a8c7688cf676c3cf9899584adb\`.
+
+### Conversation and state contract
+
+- **Exploration is not a permanent profile edit.** A new request for 3-bed
+  options while the profile prefers 2 beds uses an isolated \`active_search\`
+  record. The original main budget and bedroom preferences survive. A clear
+  buyer declaration ("Now I prefer 3 bedrooms") may revise them with evidence.
+- **Independent parallel concerns:** \`conversation_focus\` represents the
+  current property topic; \`active_search\` the latest search; \`visit_draft\`
+  the requested appointment; \`visit_planning_paused\` indicates exploration
+  interrupted a booking discussion. The lead is free to resume any of them.
+- **Typed agent tool:** \`search_properties\` derives effective constraints
+  from the saved profile plus the current buyer message, verifies typed model
+  filters against buyer evidence, returns ground-truth matching inventory and
+  logs whether the search was temporary. It never modifies a visit draft.
+- **Public facts vs buyer searches:** search requests cannot trigger a
+  stale-property detail prefetch or the \`_verified_fact_reply\` repair hook.
+  The outbound policy checks the current search's matched unit IDs. If Hermes
+  omits a clear search, a restricted, catalog-grounded recovery provides a
+  relevant answer instead of the old property's price.
+- **Assets:** when helpful, a property detail/gallery reply may mention the
+  existence of unshared approved photos or PDFs once per house. Only
+  explicitly requested links are delivered. A fact sheet is not a floor plan.
+- **Journey UI:** the sidebar marks Exploration / Details / Visit as the
+  current phase and separately displays temporary matching options and
+  any paused visit to another property.
+- **Commercial memory:** source messages, search sessions, presented options,
+  answered topics and actually shared assets remain in persisted lead state.
+
+### Hermes library integration
+
+We use the documented \`AIAgent.run_conversation()\` loop, scoped domain
+toolset, and server-owned \`conversation_history\`. A stable
+\`ephemeral_system_prompt\` describes business procedures; verified
+turn-specific context is supplied with the current user turn via
+\`persist_user_message\`, which is supported by the pinned Hermes commit.
+The actual buyer message (not the enriched envelope) is retained in the
+Hermes continuation. \`skip_memory=True\` prevents cross-lead memory leakage
+in a process-global Hermes home; Turso owns per-lead commercial facts and
+conversation history. Runtime tool registration remains serialized and
+allowlisted. We do not enable unrestricted terminal, web or files.
+
+### Invariants
+
+1. Searching and viewing a property do not authorize a visit or permanent
+   preference revision.
+2. Existing maximum budgets remain effective unless the buyer explicitly
+   requests to explore or adopt a higher maximum.
+3. The backend exclusively validates slots, consent, advisor allocation and
+   database commits; no confirmation before the transaction succeeds.
+4. Source evidence is required for persistent preference changes and tool-
+   provided criteria; responses cannot cite unapproved properties or URLs.
+5. No customer data or secrets may be included in synthetic regression fixtures.
+
+### Review before merging
+
+Run \`PYTHONPATH=backend python -m pytest -q backend/tests\`, regenerate the
+catalog and verify no differences, and \`cd frontend && npm install && npm run
+build\`. GitHub Actions performs these checks. Also test Hermes/OpenRouter/Turso
+on a non-production Preview with fictional leads, especially **a paused H-201
+visit interrupted by "other 3-bedroom homes under my $300k budget"**. CI tests
+cover deterministic contracts and a complete HTTP/Turso-like mocked turn,
+not live language-model reliability. Do not auto-merge this PR.
+
 ## v12 — Contextual Sales Graph & Commercial Memory
 
 v12 fixes the **Nov 21 property-details confirmation loop**. The buyer asked for

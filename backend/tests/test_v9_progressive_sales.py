@@ -130,12 +130,13 @@ def test_media_tool_refuses_unsolicited_media_and_releases_one_requested_link(mo
         def __init__(self, **kw):
             self.valid_tool_names = list(handlers)
             assert kw['enabled_toolsets'] == [hermes_runtime.TOOLSET]
-        def run_conversation(self, message, conversation_history):
+        def run_conversation(self, message, conversation_history, persist_user_message=None):
+            assert persist_user_message in ('Tell me about H-201','Photos of H-201 please')
             requested = json.loads(handlers['get_unit_media']({'unit_id':'H-201'}))
-            if message == 'Tell me about H-201':
+            if persist_user_message == 'Tell me about H-201':
                 assert 'error' in requested
                 response = 'H-201 is a two-bedroom house. Would you like photos?'
-            elif message == 'Photos of H-201 please':
+            elif persist_user_message == 'Photos of H-201 please':
                 assert requested['ok']
                 assert 'documents' not in requested
                 assert requested['gallery_url'].endswith('/properties/H-201/gallery')
@@ -163,7 +164,10 @@ def test_media_tool_refuses_unsolicited_media_and_releases_one_requested_link(mo
     domain.begin_turn(state, 'Photos of H-201 please')
     text = hermes_runtime.chat('Photos of H-201 please', [], state)['reply']
     assert text in state['_approved_media_urls_this_turn']
-    assert delivery_policy.validate_outbound(text,state) == text
+    delivered=delivery_policy.validate_outbound(text,state)
+    assert delivered.startswith(text)
+    assert 'PDF fact sheet' in delivered
+    assert not any(d['url'] in delivered for d in domain.unit_media('H-201')['documents'])
 
 
 def test_single_media_offer_accepts_yes_but_ambiguous_offer_does_not():

@@ -83,6 +83,10 @@ def _verified_fact_reply(state: dict, plain: str) -> str | None:
     """Repair an unanswered, single-property public fact without extra consent."""
     from . import conversation_context
     question=str(state.get('_active_source_message_text') or '')
+    # A price mention inside an alternative search is NOT a question about
+    # the previously discussed property's price.
+    if state.get('_turn_intent') in ('property_search','property_comparison'):
+        return None
     topic=conversation_context.topic(question) or state.get('_pending_factual_topic_override')
     original_question=state.get('_pending_factual_request_text') or question
     if topic not in ('area','price','bedrooms','bathrooms','kitchen','backyard',
@@ -156,6 +160,52 @@ def _verified_fact_reply(state: dict, plain: str) -> str | None:
     return None
 
 
+
+def _suggest_available_assets(state: dict, message: str) -> str:
+    """Offer approved *resource names* once, never unsolicited links."""
+    from . import domain
+    question=str(state.get('_active_source_message_text') or '')
+    if state.get('_turn_intent') in (
+            'property_search','property_comparison','booking_action','visit_planning'):
+        return message
+    resolved=state.get('_turn_property_resolution') or {}
+    code=resolved.get('unit_id')
+    if resolved.get('ambiguous') or code not in domain._units_by_code():
+        return message
+    media=domain.unit_media(code)
+    if media.get('error'):
+        return message
+    sent=(state.get('shared_media') or {}).get(code) or {}
+    offered=state.setdefault('offered_assets',{}).setdefault(code,[])
+    photo_requested=bool(re.search(r'\b(?:photos?|gallery|pictures?|images?)\b',question,re.I))
+    media_requested=photo_requested or bool(re.search(
+        r'\b(?:pdfs?|brochures?|plans?|documents?|fact.?sheets?)\b',question,re.I))
+    broad_detail=bool(re.search(
+        r'\b(?:tell me more|details|about (?:it|this|the)|features|characteristics)\b',question,re.I))
+    if not (broad_detail or (media_requested and _urls(message))):
+        return message
+    suggestions=[]
+    sent_docs=set(sent.get('document_urls_sent') or [])
+    if media.get('documents') and 'documents' not in offered:
+        remaining=[d for d in media['documents'] if d['url'] not in sent_docs]
+        if remaining:
+            label=('PDF fact sheet' if any(
+                (d.get('type')=='fact_sheet' or
+                'fact sheet' in str(d.get('title','')).lower()) for d in remaining)
+                else 'property PDF')
+            if label.lower() not in message.lower():
+                suggestions.append(label)
+            offered.append('documents')
+    if media.get('gallery_available') and 'gallery' not in offered:
+        if not sent.get('gallery_sent') and not photo_requested and 'gallery' not in message.lower():
+            suggestions.append('photos')
+        offered.append('gallery')
+    if not suggestions:
+        return message
+    return message.rstrip()+' I can also share '+(' and '.join(suggestions))+f' for {code} if you would like.'
+
+
+
 def validate_outbound(reply: str, state: dict) -> str:
     """Avoid duplicate intros, unsolicited/fictional URLs and catalog dumps.
 
@@ -183,7 +233,8 @@ def validate_outbound(reply: str, state: dict) -> str:
         return ('Your requested visit could not be confirmed: ' +
                 state['_booking_completion_error'] +
                 ' Your existing appointment, if any, is unchanged. Can I check another time?')
-    if draft.get('status')=='awaiting_confirmation':
+    if (draft.get('status')=='awaiting_confirmation' and
+            state.get('_turn_intent') not in ('property_search','property_comparison')):
         false_claim=bool(re.search(
             r"\b(?:is confirmed|has been confirmed|i(?:'ve| have) (?:booked|scheduled)|"
             r"your visit is booked|your booking is confirmed)\b",plain,re.I))
@@ -192,6 +243,29 @@ def validate_outbound(reply: str, state: dict) -> str:
         just_selected=bool(re.search(r'\b\d{1,2}(?::00)?\s*(?:am|pm)\b',active_user_text,re.I))
         if false_claim or wrong_day or just_selected:
             return _pending_visit_recap(state)
+    # A missing/incorrect Hermes search-tool call must not return the price
+    # of the *previously* discussed home. Recover from server-verified catalog
+    # only when the buyer clearly requested a new search.
+    if state.get('_turn_intent')=='property_search' and search_results is None:
+        from . import domain
+        outcome=domain.search_properties(state)
+        if outcome.get('ok'):
+            search_results=outcome['matching_properties']
+            state['_automatic_search_recovery']=True
+            state.setdefault('tool_observations',[]).append({
+                'tool':'search_response_recovery','status':'applied',
+                'fields':['property_search'],
+                'message_id':state.get('_active_source_message_id'),
+                'timestamp':domain.now_local().isoformat()})
+    if state.get('_turn_intent')=='property_search' and search_results is not None:
+        names={c.upper() for c in re.findall(r'\bH-\d+\b',plain,re.I)}
+        matches={u['unit_id'] for u in search_results}
+        allowed=set(state.get('_allowed_alternative_units_this_turn') or [])
+        if (state.get('_automatic_search_recovery') or
+                bool(names-matches-allowed) or
+                (not matches and not re.search(
+                    r'\b(?:no (?:matches|houses|options)|none|no properties)\b',plain,re.I))):
+            return _matching_reply(search_results)
     repaired=_verified_fact_reply(state,plain)
     if repaired is not None:
         state['_fact_answer_repaired_this_turn']=True
@@ -211,4 +285,4 @@ def validate_outbound(reply: str, state: dict) -> str:
                     r'\b(?:optional|alternative|different|extra)\b',plain,re.I))):
             return _matching_reply(search_results)
     _record_sent_media(state,plain)
-    return plain
+    return _suggest_available_assets(state,plain)
