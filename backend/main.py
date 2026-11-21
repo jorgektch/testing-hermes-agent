@@ -264,7 +264,8 @@ def _begin_turn(state: dict, message: str) -> None:
     from app import commercial_turn
     ref=state.get('_turn_property_resolution') or {}
     intent=commercial_turn.core_query_topic(message)
-    if (ref.get('unit_id') and not ref.get('ambiguous') and
+    if (state.get('_turn_intent') not in ('property_search','preference_update') and
+            ref.get('unit_id') and not ref.get('ambiguous') and
             (intent or state.get('_pending_factual_topic_override')) in
             ('area','price','bedrooms','bathrooms','kitchen',
                        'backyard','parking','location','availability')):
