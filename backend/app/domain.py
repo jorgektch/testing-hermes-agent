@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 from datetime import timezone
-from . import scheduling, sales_preferences
+from . import scheduling, sales_preferences, conversation_context
 
 PROJECT_TZ = ZoneInfo('America/Lima')
 VISIT_MINUTES = 45
@@ -96,6 +96,11 @@ def blank_state() -> dict:
         'booked_visits': [],
         'booking_proposal': None,
         'property_interests': [],
+        'last_presented_units': [],
+        'last_assistant_reply': None,
+        'conversation_phase': 'discovery',
+        'answered_topics': [],
+        'conversation_transitions': [],
         'ui_fact_evidence': {},
         'tool_observations': [],
         'events': [],
@@ -270,47 +275,66 @@ def _set_visit_unit(state: dict, code: str) -> None:
 
 
 def _observe_inbound_context(state: dict, message: str) -> None:
-    """Track explicitly discussed houses; never treat a question as booking consent."""
-    known = _units_by_code()
-    mentioned = list(dict.fromkeys(code.upper() for code in re.findall(
-        r'(?<![A-Z0-9])H-\d{3}(?![A-Z0-9])', message.upper()) if code.upper() in known))
-    focus = _focus(state)
-    if len(mentioned) == 1:
-        _set_focus(state, mentioned[0])
-    elif len(mentioned) > 1:
-        focus['ambiguous'] = True
-        state['bp_episode']['sales_dialogue_states']['state_json']['conversation_focus'] = copy.deepcopy(focus)
-    visit_intent = bool(re.search(
-        r'\b(?:visit|tour|book|schedule|appointment|slots|visit times|which hours|what times|see in person|view in person|see\s+H-\d{3}|view\s+H-\d{3})\b',
-        message, flags=re.I))
-    negated = bool(re.search(r"\b(?:don['’]?t|do not|not|cancel|without)\s+"
-                             r"(?:want to )?(?:visit|tour|book|schedule)\b", message, flags=re.I))
-    affirmative = bool(re.fullmatch(
+    """Resolve topic references without treating exploration as booking consent.
+
+    The buyer can ask for public details of the sole H-201 we just recommended,
+    without ever saying "H-201" or declaring interest. Booking is independent.
+    """
+    known=_units_by_code()
+    resolution=conversation_context.resolved_reference(state,message,known)
+    state['_turn_property_resolution']=resolution
+    named=conversation_context.mentioned_codes(message,known)
+    discussed=bool(conversation_context.is_detail_question(message))
+    exploration_yes=conversation_context.is_property_confirmation(
+        message,str(state.get('last_assistant_reply') or ''))
+    visit_intent=bool(re.search(
+        r'\b(?:visit|tour|book|schedule|appointment|slots|visit times|'
+        r'which hours|what times|see in person|view in person|'
+        r'see\s+H-\d{3}|view\s+H-\d{3})\b',message,re.I))
+    negated=bool(re.search(
+        r"\b(?:don['’]?t|do not|not|cancel|without)\s+(?:want to )?"
+        r"(?:visit|tour|book|schedule)\b",message,re.I))
+    interest_declared=bool(re.search(
+        r'\b(?:i(?: am|m|\'m)? interested|i (?:want|like|prefer|choose|pick) '
+        r'(?:that|this|the) (?:house|one|property)|i prefer that one)\b',
+        message,re.I))
+    should_focus=(len(named)==1 or
+                  (resolution.get('unit_id') and (
+                      discussed or exploration_yes or interest_declared or
+                      visit_intent or resolution.get('reason') in ('ordinal','comparative'))))
+    if should_focus and resolution.get('unit_id'):
+        _set_focus(state,resolution['unit_id'])
+        state['conversation_phase']='property_details' if discussed or exploration_yes else state.get('conversation_phase','discovery')
+        if exploration_yes or interest_declared:
+            state['stage']='Exploring property details'
+    elif resolution.get('ambiguous') and (discussed or exploration_yes or visit_intent):
+        state['_turn_property_ambiguous']=True
+    offer=state.pop('pending_visit_offer',None)
+    affirmative=bool(re.fullmatch(
         r'\s*(?:yes|yes please|sure|please do|that works|sounds good|ok|okay)[.!]?\s*',
-        message, flags=re.I))
-    offer = state.pop('pending_visit_offer', None)
-    if affirmative and offer and not mentioned and offer.get('unit_id') in known:
-        _set_visit_unit(state, offer['unit_id'])
+        message,re.I))
+    if (affirmative and offer and not named and
+            offer.get('unit_id') in known):
+        _set_visit_unit(state,offer['unit_id'])
+        state['conversation_phase']='visit_planning'
         return
-    existing_visit_reference = bool(re.search(
+    existing_visit_reference=bool(re.search(
         r'\b(?:confirm|go ahead|proceed|finalize|reschedule|cancel)\b|'
         r'\b(?:my|our|the)\s+appointment\b|\bthe visit we discussed\b',
-        message, flags=re.I))
-    if existing_visit_reference and not mentioned and _draft(state).get('unit_id'):
+        message,re.I))
+    if existing_visit_reference and not named and _draft(state).get('unit_id'):
         return
-    active=next((b for b in state.get('booked_visits',[]) if b.get('status')=='confirmed'),None)
+    active=next((b for b in state.get('booked_visits',[])
+                 if b.get('status')=='confirmed'),None)
     if active and re.search(
         r'\b(?:reschedule|change|move|postpone|switch)\b.*'
         r'\b(?:visit|appointment|date|day|time)\b',message,re.I):
         draft=_draft(state)
         draft['action']='reschedule'
         draft['original_meeting_id']=active['meeting_id']
-    if visit_intent and not negated:
-        target = mentioned[0] if len(mentioned) == 1 else (
-            focus.get('unit_id') if not mentioned and not focus.get('ambiguous') else None)
-        if target:
-            _set_visit_unit(state, target)
-
+    if visit_intent and not negated and resolution.get('unit_id') and not resolution.get('ambiguous'):
+        _set_visit_unit(state,resolution['unit_id'])
+        state['conversation_phase']='visit_planning'
 
 def _slot_error(code: str, message: str, unit_id: str | None = None,
                 *, next_action: str, **details) -> dict:
@@ -358,6 +382,7 @@ def begin_turn(state: dict, message: str) -> None:
     mid = str(uuid.uuid4())
     state['_active_source_message_id'] = mid
     state['_active_source_message_text'] = message
+    state['_last_inbound_topic']=conversation_context.topic(message)
     _observe_inbound_context(state, message)
     bp['sales_messages'].append({
         'id': mid, 'conversation_id': bp['ids']['conversation_id'],
@@ -372,6 +397,54 @@ def begin_turn(state: dict, message: str) -> None:
     bp['leads']['funnel_stage'] = 'contacted' if not state['booked_visits'] else 'appointment_set'
 
 
+
+def _remember_answered_topics(state: dict, reply: str) -> None:
+    """Record information actually delivered, not merely fetched by a tool."""
+    topic=state.get('_last_inbound_topic')
+    resolution=state.get('_turn_property_resolution') or {}
+    unit_id=resolution.get('unit_id') or _focus(state).get('unit_id')
+    details=state.get('_details_for_current_turn') or {}
+    if (topic in ('area','bathrooms','bedrooms','kitchen','parking','backyard',
+                  'price','location','availability') and
+            unit_id in _units_by_code() and
+            details.get('unit_id')==unit_id and not resolution.get('ambiguous')):
+        unit=_units_by_code()[unit_id]
+        expected={
+            'area':[str(unit.get('area_sqm')),str(unit.get('lot_area_m2'))],
+            'bathrooms':[str(unit.get('bathrooms'))],
+            'bedrooms':[str(unit.get('bedrooms'))],
+            'price':[str(unit.get('price_usd')),f"{int(unit.get('price_usd')):,}"],
+            'parking':[str(unit.get('confirmed_features',{}).get('parking_spaces'))],
+            'backyard':[str(unit.get('confirmed_features',{}).get('backyard_area_m2'))],
+            'kitchen':[str(unit.get('confirmed_features',{}).get('kitchen_layout'))],
+            'location':[str((unit.get('location') or {}).get('city'))],
+            'availability':[str(unit.get('available_from_date'))],
+        }.get(topic,[])
+        if any(x and x!='None' and x.lower() in reply.lower() for x in expected):
+            record_={'unit_id':unit_id,'topic':topic,
+                     'source_message_id':state.get('_active_source_message_id'),
+                     'reply_message_id':state['bp_episode']['sales_messages'][-1]['id'],
+                     'recorded_at':now_local().isoformat()}
+            items=state.setdefault('answered_topics',[])
+            items.append(record_)
+            state['answered_topics']=items[-80:]
+    dialogue=state['bp_episode']['sales_dialogue_states']['state_json']
+    memory=dialogue.setdefault('memory',{})
+    memory['answered_topics']=copy.deepcopy(state.get('answered_topics',[])[-40:])
+    memory['recent_turns']=(memory.get('recent_turns',[])+[{
+        'inbound_id':state.get('_active_source_message_id'),
+        'inbound_topic':topic,'unit_id':unit_id,
+        'assistant_reply_id':state['bp_episode']['sales_messages'][-1]['id'],
+        'phase':state.get('conversation_phase'),
+    }])[-12:]
+    memory['as_of_message_id']=state['bp_episode']['sales_messages'][-1]['id']
+    state['conversation_transitions']=(state.get('conversation_transitions',[])+[{
+        'message_id':state.get('_active_source_message_id'),
+        'unit_id':unit_id,'phase':state.get('conversation_phase'),
+        'topic':topic,
+    }])[-35:]
+
+
 def end_turn(state: dict, reply: str) -> None:
     """Record the assistant response and remove transient source text."""
     bp = state['bp_episode']
@@ -383,6 +456,11 @@ def end_turn(state: dict, reply: str) -> None:
         'created_at': datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z'),
     })
     bp['sales_conversations']['continuity_json']['waiting_for_lead'] = True
+    _remember_answered_topics(state, reply)
+    new_mentions=conversation_context.presented_units(reply,_units_by_code())
+    if new_mentions:
+        state['last_presented_units']=new_mentions
+    state['last_assistant_reply']=reply
     state.pop('_active_source_message_id', None)
     state.pop('_active_source_message_text', None)
     # A simple explicit single-media offer can be accepted with "yes" next turn.
