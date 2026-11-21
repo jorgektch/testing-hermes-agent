@@ -1,7 +1,7 @@
 'use client';
 
 import {useCallback,useEffect,useRef,useState} from 'react';
-import {ArrowDown,ArrowUp,Bath,BedDouble,Building2,CalendarDays,Check,ChevronDown,ChevronRight,Copy,Download,FileText,Images,Info,LockKeyhole,LogOut,MapPin,MessageCircle,Plus,ShieldCheck,Square,Trash2,UserRound,Users,X} from 'lucide-react';
+import {ArrowDown,ArrowUp,Bath,BedDouble,Building2,CalendarDays,Check,ChevronDown,ChevronRight,Copy,Download,FileText,Images,Info,LockKeyhole,LogOut,MapPin,MessageCircle,Plus,ShieldCheck,Search,Square,Trash2,UserRound,Users,X} from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import SalesCalendar from './calendar';
