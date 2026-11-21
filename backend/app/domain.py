@@ -281,7 +281,7 @@ def _observe_inbound_context(state: dict, message: str) -> None:
         focus['ambiguous'] = True
         state['bp_episode']['sales_dialogue_states']['state_json']['conversation_focus'] = copy.deepcopy(focus)
     visit_intent = bool(re.search(
-        r'\b(?:visit|tour|book|schedule|appointment|slots|visit times|which hours|what times|see in person|view in person)\b',
+        r'\b(?:visit|tour|book|schedule|appointment|slots|visit times|which hours|what times|see in person|view in person|see\s+H-\d{3}|view\s+H-\d{3})\b',
         message, flags=re.I))
     negated = bool(re.search(r"\b(?:don['’]?t|do not|not|cancel|without)\s+"
                              r"(?:want to )?(?:visit|tour|book|schedule)\b", message, flags=re.I))
