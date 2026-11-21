@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 from datetime import timezone
-from . import scheduling
+from . import scheduling, sales_preferences
 
 PROJECT_TZ = ZoneInfo('America/Lima')
 VISIT_MINUTES = 45
@@ -87,6 +87,12 @@ def blank_state() -> dict:
                                'source_message_id': None},
         'visit_draft': {'unit_id': None, 'date': None, 'start_time': None, 'status': 'idle'},
         'last_slot_search': None,
+        'last_offered_date': None,
+        'booking_offers': {},
+        'confirmation_request': None,
+        'shared_media': {},
+        'search_preferences': sales_preferences.empty(),
+        'search_preferences_history': [],
         'booked_visits': [],
         'booking_proposal': None,
         'property_interests': [],
@@ -97,6 +103,103 @@ def blank_state() -> dict:
         'bp_episode': bp,
     }
 
+
+
+
+def _preferences(state: dict) -> dict:
+    if 'search_preferences' not in state:
+        prefs=sales_preferences.empty()
+        lead=state.get('lead') or {}
+        if lead.get('budget_usd'):
+            prefs['budget'].update(mode='cap', maximum_usd=int(lead['budget_usd']))
+        if lead.get('min_bedrooms'):
+            prefs['bedrooms'].update(mode='minimum', minimum=int(lead['min_bedrooms']))
+        state['search_preferences']=prefs
+    return state['search_preferences']
+
+
+def update_search_preferences(state: dict, **kwargs) -> dict:
+    """Revise commercial preferences only when supported by the buyer's message."""
+    keys={'budget_minimum_usd':('budget','minimum_usd'),
+          'budget_maximum_usd':('budget','maximum_usd'),
+          'budget_target_usd':('budget','target_usd'),
+          'budget_exact_price_usd':('budget','exact_price_usd'),
+          'budget_mode':('budget','mode'),
+          'bedrooms_min':('bedrooms','minimum'),
+          'bedrooms_max':('bedrooms','maximum'),
+          'bedrooms_preferred':('bedrooms','preferred'),
+          'bedrooms_mode':('bedrooms','mode')}
+    if set(kwargs)-set(keys):
+        return {'error':'Unknown commercial preference.'}
+    message=str(state.get('_active_source_message_text') or '')
+    recognized=sales_preferences.parse_declarations(message)
+    requested={}
+    for name,value in kwargs.items():
+        group,field=keys[name]
+        requested.setdefault(group,{})[field]=value
+    if recognized:
+        for group,passed in list(requested.items()):
+            declared=recognized.get(group)
+            if declared:
+                for field,value in passed.items():
+                    if field in declared and value!=declared[field]:
+                        return {'error':'Preference disagrees with buyer statement.'}
+                requested[group]=declared
+    elif message and requested:
+        return {'error':'Ask the buyer to clarify the exact commercial preference.'}
+    result=sales_preferences.apply(state, requested,
+        source_message_id=state.get('_active_source_message_id'))
+    if not result.get('ok') or not result['changed_fields']:
+        return result
+    prefs=state['search_preferences']
+    facts={}
+    if 'budget' in result['changed_fields']:
+        b=prefs['budget']
+        if b['minimum_usd'] is not None:facts['budget_minimum']=b['minimum_usd']
+        if b['maximum_usd'] is not None:facts['budget_maximum']=b['maximum_usd']
+        facts['budget']=(f"USD {b['target_usd']} ({b['mode']})" if b['target_usd'] else
+            f"USD {b['exact_price_usd']} (exact listing price)" if b['exact_price_usd'] else
+            f"USD {b['minimum_usd'] or 'unset'} to {b['maximum_usd'] or 'unset'} ({b['mode']})")
+        ledger=state['bp_episode']['leads']['lead_profile_data']['sales_profile']
+        for key in ('budget_minimum','budget_maximum'):
+            if key not in facts and key in ledger['current']:
+                old=ledger['current'].pop(key)
+                old['status']='superseded'
+                ledger['history'].append(old)
+        state.setdefault('ui_fact_evidence',{})['budget_usd']={
+            'source_message_id':state.get('_active_source_message_id'),
+            'evidence':message,'captured_at':now_local().isoformat(),
+            'source':'active_conversation'}
+    if 'bedrooms' in result['changed_fields']:
+        b=prefs['bedrooms']
+        facts['bedrooms']=next(n for n in (b['preferred'],b['minimum'],b['maximum']) if n is not None)
+    _capture_bp_facts(state,facts)
+    state['stage']='Preferences updated'
+    record(state,'preferences_updated',
+           f"Revised {', '.join(result['changed_fields'])} (revision {prefs['revision']})")
+    return result
+
+
+def _selected_offer(state: dict) -> dict | None:
+    draft=_draft(state)
+    offer_id=draft.get('proposal_id')
+    if offer_id:
+        return ((state.get('booking_offers') or {}).get(offer_id) or
+                (state.get('booking_proposal') or {}))
+    p=state.get('booking_proposal') or {}
+    if p.get('selected_start_time')==draft.get('start_time') and p.get('selected_date')==draft.get('date'):
+        return p
+    return None
+
+
+def _resolve_visit_date(state: dict, raw: str) -> str:
+    if raw.strip().lower() in ('the following day','following day','next day',
+                                'the next day','day after'):
+        anchor=state.get('last_offered_date')
+        if not anchor:
+            raise ValueError('Which date do you mean by the following day?')
+        return (date.fromisoformat(anchor)+timedelta(days=1)).isoformat()
+    return date_input(raw)
 
 
 def _units_by_code() -> dict[str, dict]:
