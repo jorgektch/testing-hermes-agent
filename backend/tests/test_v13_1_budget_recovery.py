@@ -23,6 +23,17 @@ def state_after_first_turn():
     return state
 
 
+def test_first_bedroom_declaration_creates_one_revision_with_evidence():
+    state=domain.blank_state()
+    main._begin_turn(state,FIRST)
+    assert len(state['search_preferences_history'])==1
+    assert state['search_preferences']['bedrooms']['mode']=='preferred'
+    assert state['lead']['min_bedrooms']==2
+    evidence=state['ui_fact_evidence']['min_bedrooms']
+    assert evidence['source_message_id']==state['_active_source_message_id']
+    assert evidence['evidence']==FIRST
+
+
 def test_budget_expression_is_a_persistent_cap_not_detail_question():
     assert commercial_turn.intent(BUDGET)=='preference_update'
     assert commercial_turn.scope(BUDGET,has_primary=True)=='permanent'
