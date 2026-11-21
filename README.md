@@ -174,3 +174,7 @@ For details, see [`docs/V4_ARCHITECTURE.md`](docs/V4_ARCHITECTURE.md).
 - Hermes `get_unit_media` returns one absolute gallery URL (when present) and unit-only PDF links. Set `DEMO_PUBLIC_BASE_URL` if the application has a different public domain. The frontend allows only trusted gallery/PDF paths in Markdown.
 - The login form has one administrator password; the server rejects `role=evaluator`, and existing evaluator cookies can no longer access protected endpoints. Existing lead records remain intact for administrators.
 - **Security:** using `demo` as the administrator password with `DEMO_ALLOW_WEAK_CREDENTIALS=true` allows anyone who knows it to view and permanently delete all leads. This is suitable only for controlled synthetic-data testing.
+
+## v6: chronologically ordered conversations and live profile
+
+Chat messages now show browser-local dates and `HH:mm:ss`; old mixed-zone message rows are upgraded in place and ordered by a stable per-conversation sequence. The lead panel shows validated facts and message provenance, with provisional previews from Hermes tool executions over authenticated POST/SSE and a final Turso commit. See [v6 architecture and migration notes](docs/V6_CHRONOLOGY_LIVE_PROFILE.md).

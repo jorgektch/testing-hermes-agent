@@ -12,3 +12,18 @@
 @media(max-width:1030px){.workspace{grid-template-columns:minmax(240px,1fr) minmax(300px,1.15fr)}.lead-panel{grid-column:1/-1;min-height:260px;max-height:300px;border-top:1px solid var(--line)}.lead-scroll{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 20px}.lead-panel .panel-top{min-height:45px}.sidebar{display:none}.workspace{height:calc(100dvh - var(--header));overflow-y:auto}.inventory-panel,.chat-panel{min-height:470px}.chat-panel{border-right:0}.lead-panel{overflow:hidden}}
 @media(max-width:670px){.topbar{padding:0 11px}.topbar-actions>small{display:none}.workspace{display:flex;flex-direction:column;height:calc(100dvh - var(--header));overflow-y:auto}.inventory-panel{min-height:410px;max-height:520px}.chat-panel{min-height:530px;max-height:620px}.lead-panel{min-height:360px;max-height:none}.lead-scroll{display:block}.calendar-expanded{inset:7px}.calendar-expanded .calendar-scroll{max-height:calc(100dvh - 220px)}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
+
+/* v6 · Chronology, source-linked facts and provisional Hermes tool events */
+.chat-date-divider{display:flex;align-items:center;gap:14px;margin:14px 0 22px;color:#9d9d9d;font-size:10px;text-align:center;letter-spacing:.02em}
+.chat-date-divider:before,.chat-date-divider:after{content:"";height:1px;flex:1;background:var(--line)}
+.message-meta{display:flex;align-items:center;justify-content:space-between;gap:14px;color:var(--sub);font-size:10px;margin:0 0 7px}
+.message-meta time{font-variant-numeric:tabular-nums;color:#a8a8a8;white-space:nowrap}
+.message.user .message-meta{flex-direction:row}
+.message-highlighted .message-content{outline:2px solid var(--amber);outline-offset:3px;transition:outline-color .3s}
+.fact-info{display:flex;align-items:flex-end;flex-direction:column;max-width:70%;gap:3px}
+.fact-info strong{max-width:100%;text-align:right;overflow-wrap:anywhere;font-size:11px}
+.fact-provenance{border:0;padding:0;background:none;color:#c1a06a;text-align:right;font-size:9px;cursor:pointer}
+.fact-provenance:hover{text-decoration:underline}
+.profile-preview-note{font-size:10px;color:#ddb877;border:1px solid #755b2b;padding:9px;border-radius:5px;margin-top:13px}
+
+.message-provisional .message-content{border-style:dashed;opacity:.85}

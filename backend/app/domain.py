@@ -84,6 +84,8 @@ def blank_state() -> dict:
         'booked_visits': [],
         'booking_proposal': None,
         'property_interests': [],
+        'ui_fact_evidence': {},
+        'tool_observations': [],
         'events': [],
         'turn_count': 0,
         'bp_episode': bp,
@@ -109,7 +111,7 @@ def begin_turn(state: dict, message: str) -> None:
         'role': 'user', 'direction': 'inbound', 'channel': 'simulation',
         'content': message, 'status': 'received',
         'metadata_json': {'lead_id': bp['ids']['lead_id'], 'project_id': bp['ids']['project_id']},
-        'created_at': now_local().isoformat(),
+        'created_at': datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z'),
     })
     bp['sales_conversations']['continuity_json']['last_inbound_message_id'] = mid
     bp['sales_conversations']['continuity_json']['waiting_for_lead'] = False
@@ -125,7 +127,7 @@ def end_turn(state: dict, reply: str) -> None:
         'role': 'assistant', 'direction': 'outbound', 'channel': 'simulation',
         'content': reply, 'status': 'simulated',
         'metadata_json': {'lead_id': bp['ids']['lead_id'], 'project_id': bp['ids']['project_id']},
-        'created_at': now_local().isoformat(),
+        'created_at': datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z'),
     })
     bp['sales_conversations']['continuity_json']['waiting_for_lead'] = True
     state.pop('_active_source_message_id', None)
@@ -510,6 +512,17 @@ def update_lead(state: dict, **kwargs: Any) -> dict:
             changed['interest_unit_id']=interest
     if changed or bp_changed:
         lead.update(changed)
+        # UI-only fields (e.g. House vs Apartment) are not part of BP's 16
+        # canonical commercial facts. Keep their provenance in the episode too.
+        active_message = state.get('_active_source_message_id')
+        if active_message:
+            for field in changed:
+                state.setdefault('ui_fact_evidence', {})[field] = {
+                    'source_message_id': active_message,
+                    'evidence': state.get('_active_source_message_text') or '',
+                    'captured_at': datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z'),
+                    'source': 'active_conversation',
+                }
         # Give explicitly supplied BP-native values priority over legacy alias projections.
         merged=dict(changed)
         canonical_alias={'budget_usd':'budget','purchase_timeframe':'purchase_timeline',
@@ -527,6 +540,59 @@ def update_lead(state: dict, **kwargs: Any) -> dict:
         record(state,'lead_update','Updated '+', '.join(k.replace('_',' ') for k in sorted(set(changed)|set(bp_changed))))
     return {'ok':True,'changed_fields':changed,'changed_profile_facts':bp_changed,
             'lead_profile':lead,'stage':state['stage']}
+
+
+def explicitly_declared_preferences(message: str) -> dict:
+    """Conservative deterministic guard for *unambiguous* direct requests.
+
+    Hermes remains responsible for commercial reasoning and calls all regular
+    domain tools. This deliberately tiny validator makes a clearly stated
+    "2-bedroom house" observable if the model omits update_lead_profile.
+    We never infer a budget, a particular unit, financing or buying intent.
+    """
+    text = str(message or '').strip()
+    if not text or '?' in text:
+        return {}
+    intent = re.search(r"\b(?:i(?:'m| am)\s+looking\s+for|i\s+(?:need|want|prefer)|"
+                       r"we(?:'re| are)\s+looking\s+for|i(?:'d| would)\s+like)\b"
+                       r"(?P<request>.{1,130})", text, flags=re.I)
+    if not intent:
+        return {}
+    request = intent.group('request').split(';')[0]
+    # Uncertainty, negation and alternatives are not safe to assign.
+    if re.search(r"\b(?:not|don't|dont|rather than|instead of|either|or|maybe|perhaps|possibly)\b", request, re.I):
+        return {}
+    kinds = set(x.lower() for x in re.findall(r'\b(?:house|apartment)\b', request, re.I))
+    if len(kinds) != 1:
+        return {}
+    result = {'property_type': 'House' if 'house' in kinds else 'Apartment'}
+    beds = re.search(r'\b([1-9]|1[0-9])\s*[- ]?\s*(?:bedroom|bedrooms|bed|beds)\b', request, re.I)
+    if not beds:
+        beds = re.search(r'\b(?:bedrooms|beds)\s*(?:of|:)?\s*([1-9]|1[0-9])\b', request, re.I)
+    if beds:
+        result['min_bedrooms'] = int(beds.group(1))
+    return result
+
+
+def verify_explicit_preferences(state: dict, message: str) -> dict:
+    """Validate exact declarations through the *existing* domain tool path.
+
+    No second LLM, no speculative profile facts. An audit event distinguishes
+    this protective validation from Hermes-originated tool calls.
+    """
+    values = explicitly_declared_preferences(message)
+    missing = {key: val for key, val in values.items() if state['lead'].get(key) != val}
+    if not missing:
+        return {'ok': True, 'changed_fields': {}}
+    response = update_lead(state, **missing)
+    if response.get('ok'):
+        state.setdefault('tool_observations', []).append({
+            'tool': 'explicit_preference_validator', 'status': 'applied',
+            'fields': list(missing), 'message_id': state.get('_active_source_message_id'),
+            'timestamp': datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00','Z'),
+        })
+        state['tool_observations'] = state['tool_observations'][-50:]
+    return response
 
 
 def _explicit_lead_confirmation(state: dict) -> bool:
@@ -698,3 +764,21 @@ def reschedule_visit(state: dict, original_meeting_id: str, first_name: str, las
     return {'ok':True,'original_meeting_id':original_meeting_id,
             'replacement_meeting_id':new['meeting']['id'], 'booking':new['booking'],
             'notice':'Simulation only; original appointment was cancelled in this session and a replacement was created.'}
+
+
+def profile_snapshot(state: dict) -> dict:
+    """Small, read-only UI projection for in-turn Hermes tool events.
+
+    The complete state and Hermes history never enter live event payloads.
+    The server only commits the episode atomically after the agent completes.
+    """
+    bp = state.get('bp_episode') or {}
+    facts = (bp.get('leads') or {}).get('lead_profile_data', {}).get('sales_profile', {}).get('current', {})
+    return {
+        'lead': dict(state.get('lead') or {}),
+        'stage': state.get('stage'),
+        'property_interests': list(state.get('property_interests') or []),
+        'ui_fact_evidence': dict(state.get('ui_fact_evidence') or {}),
+        'facts': {k: dict(v) for k,v in facts.items()},
+        'tool_observations': list(state.get('tool_observations') or [])[-8:],
+    }

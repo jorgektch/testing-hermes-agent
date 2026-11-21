@@ -1,9 +1,13 @@
-"""Vercel Services FastAPI backend: durable evaluation workspace v4."""
+"""Vercel Services FastAPI backend: durable evaluation workspace v6."""
 from __future__ import annotations
 
 import copy
 import hashlib
 import hmac
+import json
+import logging
+import queue
+import threading
 import os
 import re
 import uuid
@@ -11,12 +15,13 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app import domain, persistence as db, scheduling
 from app.hermes_runtime import chat
 
-app = FastAPI(title='Hermes Agent Evaluation Lab', version='4.0.0', docs_url=None, redoc_url=None)
+app = FastAPI(title='Hermes Agent Evaluation Lab', version='6.0.0', docs_url=None, redoc_url=None)
 
 @app.middleware('http')
 async def private_api_headers(request: Request, call_next):
@@ -111,7 +116,7 @@ def _get_lead(lead_id: str, auth: dict) -> dict:
 
 @app.get('/api/health')
 def health():
-    return {'ok':True,'agent':'Nous Research Hermes','version':'4.0.0',
+    return {'ok':True,'agent':'Nous Research Hermes','version':'6.0.0',
             'model':os.getenv('MODEL_NAME','openai/gpt-4o-mini'),
             'configured':bool(os.getenv('OPENROUTER_API_KEY')),
             'database_mode':'turso' if os.getenv('TURSO_DATABASE_URL') else ('unconfigured' if os.getenv('VERCEL') else 'local_sqlite')}
@@ -177,28 +182,119 @@ def get_lead(lead_id: uuid.UUID, auth: dict=Depends(auth_session)):
     return _public_record(_get_lead(str(lead_id),auth))
 
 
+def _begin_turn(state: dict, message: str) -> None:
+    # Hermes receives the same authoritative in-memory turn state as its tools.
+    # This narrow deterministic guard only accepts unambiguous explicit wishes;
+    # all other extraction/decisions remain Hermes's domain tool calls.
+    domain.begin_turn(state, message)
+    verified = domain.verify_explicit_preferences(state, message)
+    if verified.get('error'):
+        raise ValueError(verified['error'])
+
+
+def _finish_turn(lead_id: str, rec: dict, state: dict, auth: dict,
+                 message: str, *, on_tool_state=None) -> dict:
+    occupied = db.occupied_by_advisor()
+    options = {'extra_occupied': occupied}
+    if on_tool_state is not None:
+        options['on_tool_state'] = on_tool_state
+    result = chat(message, rec['hermes_history'], state, **options)
+    domain.end_turn(state, result['reply'])
+    state['turn_count'] += 1
+    updated = db.save_turn(auth, lead_id, rec['revision'], state,
+                           result['history'][-90:], message, result['reply'])
+    return {'reply': result['reply'], 'lead': _public_record(updated), 'max_turns': MAX_TURNS}
+
+
 @app.post('/api/leads/{lead_id}/chat')
 def interact(lead_id: uuid.UUID, body: MessageInput, auth: dict=Depends(checked_session)):
-    lead_id=str(lead_id)
-    rec=_get_lead(lead_id,auth)
-    state=copy.deepcopy(rec['state'])
-    if state['turn_count']>=MAX_TURNS:
-        raise HTTPException(429,'This lead has reached the 14-turn demo limit.')
-    # Only server-side persisted continuation is trusted; browsers submit message text only.
+    lead_id = str(lead_id)
+    rec = _get_lead(lead_id, auth)
+    state = copy.deepcopy(rec['state'])
+    if state['turn_count'] >= MAX_TURNS:
+        raise HTTPException(429, 'This lead has reached the 14-turn demo limit.')
     try:
-        domain.begin_turn(state,body.message.strip())
-        occupied=db.occupied_by_advisor()
-        result=chat(body.message.strip(),rec['hermes_history'],state,extra_occupied=occupied)
-        domain.end_turn(state,result['reply'])
-        state['turn_count']+=1
-        updated=db.save_turn(auth,lead_id,rec['revision'],state,result['history'][-90:],body.message.strip(),result['reply'])
+        message = body.message.strip()
+        _begin_turn(state, message)
+        return _finish_turn(lead_id, rec, state, auth, message)
     except db.Conflict as exc:
-        raise HTTPException(409,str(exc)) from exc
+        raise HTTPException(409, str(exc)) from exc
     except Exception as exc:
-        import logging
-        logging.getLogger(__name__).exception('Agent turn failed: %s',type(exc).__name__)
-        raise HTTPException(503,'AI advisor temporarily unavailable. This turn was not saved; please retry.') from exc
-    return {'reply':result['reply'],'lead':_public_record(updated),'max_turns':MAX_TURNS}
+        logging.getLogger(__name__).exception('Agent turn failed: %s', type(exc).__name__)
+        raise HTTPException(503, 'AI advisor temporarily unavailable. This turn was not saved; please retry.') from exc
+
+
+def _sse(event: str, payload: dict) -> str:
+    """Named UTF-8 SSE event; no authentication data or Hermes history leaks."""
+    return 'event: ' + event + '\ndata: ' + json.dumps(payload, ensure_ascii=False, default=str) + '\n\n'
+
+
+@app.post('/api/leads/{lead_id}/chat/stream')
+def interact_stream(lead_id: uuid.UUID, body: MessageInput,
+                    auth: dict=Depends(checked_session)):
+    """POST + CSRF, first-class FastAPI SSE supported by Vercel Python.
+
+    A stream event is provisional until `committed` is emitted. No partial
+    conversation, meeting, or lead profile changes persist on Hermes failures.
+    Hermes still runs via its documented AIAgent.run_conversation path.
+    """
+    lead_id = str(lead_id)
+    rec = _get_lead(lead_id, auth)
+    if rec['state']['turn_count'] >= MAX_TURNS:
+        raise HTTPException(429, 'This lead has reached the 14-turn demo limit.')
+    message = body.message.strip()
+    state = copy.deepcopy(rec['state'])
+
+    def stream():
+        try:
+            _begin_turn(state, message)
+            started = state['bp_episode']['sales_messages'][-1]
+            yield _sse('received', {'message_id': started['id'],
+                                    'created_at': started['created_at']})
+            yield _sse('profile_preview', {'profile': domain.profile_snapshot(state),
+                                          'saved': False})
+        except Exception:
+            logging.getLogger(__name__).exception('Failed preparing streamed Hermes turn')
+            yield _sse('error', {'detail': 'Unable to prepare this turn. It was not saved.'})
+            return
+
+        events: queue.Queue = queue.Queue()
+
+        def on_tool_state(result):
+            events.put(('profile_preview', {'profile': result['profile'],
+                                            'source_tool': result['tool'],
+                                            'tool_ok': result['ok'], 'saved': False}))
+
+        def worker():
+            try:
+                payload = _finish_turn(lead_id, rec, state, auth, message,
+                                       on_tool_state=on_tool_state)
+                events.put(('committed', payload))
+            except db.Conflict as exc:
+                events.put(('error', {'detail': str(exc), 'status': 409}))
+            except Exception as exc:
+                logging.getLogger(__name__).exception('Streamed agent turn failed: %s', type(exc).__name__)
+                events.put(('error', {'detail': 'AI advisor temporarily unavailable. This turn was not saved.',
+                                      'status': 503}))
+            finally:
+                events.put(('done', {}))
+
+        # Request-scoped worker allows observing Hermes tool calls without
+        # patching its agent loop. It is not a detached/background job.
+        worker_thread = threading.Thread(target=worker, daemon=True)
+        worker_thread.start()
+        while True:
+            try:
+                kind, payload = events.get(timeout=10)
+            except queue.Empty:
+                yield ': keep-alive\n\n'
+                continue
+            if kind == 'done':
+                break
+            yield _sse(kind, payload)
+
+    return StreamingResponse(stream(), media_type='text/event-stream',
+                             headers={'X-Accel-Buffering': 'no', 'Cache-Control': 'no-store'})
 
 
 @app.get('/api/calendar')

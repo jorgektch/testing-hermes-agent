@@ -32,7 +32,7 @@ class Conflict(Exception):
 
 
 def iso(dt: datetime | None = None) -> str:
-    return (dt or datetime.now(UTC)).astimezone(UTC).isoformat(timespec='seconds').replace('+00:00', 'Z')
+    return (dt or datetime.now(UTC)).astimezone(UTC).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
 
 
 def as_dt(s: str) -> datetime:
@@ -160,6 +160,46 @@ def _reserve(con, meeting: dict):
                     (meeting['advisor_id'], bucket, meeting['id']))
 
 
+def _migrate_message_sequence(con) -> None:
+    """Upgrade old mixed-zone TEXT timestamps without dropping conversations.
+
+    The original greeting uses Z/UTC, while Hermes turn records used -05:00.
+    Sorting those strings directly is *not* chronological.  Backfill an
+    explicit per-conversation sequence using UTC instant then legacy rowid.
+    The schema marker makes the migration idempotent across cold starts.
+    """
+    cols = {c['name'] for c in _rows(con.execute('PRAGMA table_info(messages)'))}
+    if 'sequence_number' not in cols:
+        try:
+            con.execute('ALTER TABLE messages ADD COLUMN sequence_number INTEGER')
+        except Exception as exc:
+            # Two concurrent cold starts may race to add the same column.
+            if 'duplicate column' not in str(exc).lower():
+                raise
+    marker = _one(con.execute("SELECT value FROM schema_meta WHERE key='message_sequence_v1'"))
+    if not marker:
+        from collections import defaultdict
+        groups = defaultdict(list)
+        for row in _rows(con.execute('''SELECT rowid AS insertion_order,id,conversation_id,created_at
+                                        FROM messages''')):
+            groups[row['conversation_id']].append(row)
+        for conversation in groups.values():
+            # Interpret offsets as actual instants; stable rowid for equal times.
+            conversation.sort(key=lambda m: (as_dt(m['created_at']), m['insertion_order']))
+            for sequence, message in enumerate(conversation, 1):
+                con.execute('''UPDATE messages SET sequence_number=?, created_at=? WHERE id=?''',
+                            (sequence, iso(as_dt(message['created_at'])), message['id']))
+        con.execute("INSERT OR REPLACE INTO schema_meta(key,value) VALUES('message_sequence_v1',?)", (iso(),))
+    con.execute('''CREATE INDEX IF NOT EXISTS idx_messages_conversation_sequence
+                   ON messages(conversation_id, sequence_number)''')
+
+
+def _next_message_sequence(con, conversation_id: str) -> int:
+    row = _one(con.execute('''SELECT COALESCE(MAX(sequence_number),0) AS current_sequence
+                              FROM messages WHERE conversation_id=?''', (conversation_id,)))
+    return int(row['current_sequence']) + 1
+
+
 def initialize():
     key = os.getenv('TURSO_DATABASE_URL') or _db_path()
     if key in _INITIALIZED:
@@ -175,6 +215,7 @@ def _initialize_schema():
     with database() as con:
         for sql in SCHEMA:
             con.execute(sql)
+        _migrate_message_sequence(con)
         marker = _one(con.execute("SELECT value FROM schema_meta WHERE key='fixtures_seeded'"))
         if marker:
             return
@@ -241,7 +282,7 @@ def list_leads(auth: dict) -> list[dict]:
     with database() as con:
         return _rows(con.execute('''SELECT l.id,l.first_name,l.last_name,l.email,l.phone,l.created_at,l.updated_at,
                      c.id conversation_id,c.revision,
-                     (SELECT content FROM messages m WHERE m.conversation_id=c.id ORDER BY m.created_at DESC,rowid DESC LIMIT 1) last_message
+                     (SELECT content FROM messages m WHERE m.conversation_id=c.id ORDER BY m.sequence_number DESC LIMIT 1) last_message
                     FROM leads l JOIN conversations c ON c.lead_id=l.id WHERE 1=1'''+where+
                    ' ORDER BY l.updated_at DESC LIMIT 100',args))
 
@@ -253,7 +294,8 @@ def lead_get(auth: dict, lead_id: str) -> dict | None:
                          FROM leads l JOIN conversations c ON c.lead_id=l.id WHERE l.id=?'''+where,
                          (lead_id,*args)))
         if not rec:return None
-        messages=_rows(con.execute('SELECT id,role,content,created_at FROM messages WHERE conversation_id=? ORDER BY created_at,rowid', (rec['conversation_id'],)))
+        messages=_rows(con.execute('''SELECT id,role,content,created_at,sequence_number FROM messages
+                                     WHERE conversation_id=? ORDER BY sequence_number ASC''', (rec['conversation_id'],)))
     rec['state']=json.loads(rec.pop('state_json'))
     rec['hermes_history']=json.loads(rec.pop('hermes_history_json'))
     rec['messages']=messages
@@ -285,8 +327,9 @@ def create_lead(auth: dict, first_name: str, last_name: str, email: str, phone: 
         con.execute('''INSERT INTO conversations(id,lead_id,state_json,created_at,updated_at)
                        VALUES(?,?,?,?,?)''',
                     (conv_id,lead_id,json.dumps(state,ensure_ascii=False),iso(),iso()))
-        con.execute('INSERT INTO messages(id,conversation_id,role,content,created_at) VALUES(?,?,?,?,?)',
-                    (message_id,conv_id,'assistant',greeting,iso()))
+        con.execute('''INSERT INTO messages(id,conversation_id,role,content,created_at,sequence_number)
+                       VALUES(?,?,?,?,?,?)''',
+                    (message_id,conv_id,'assistant',greeting,iso(),1))
     return lead_get(auth, lead_id)
 
 
@@ -350,16 +393,24 @@ def save_turn(auth: dict, lead_id: str, old_revision: int, state: dict,
                              WHERE id=? AND revision=?''',
                         (json.dumps(new_state,ensure_ascii=False),json.dumps(hermes_history,ensure_ascii=False),iso(),conv_id,old_revision))
         if cur.rowcount != 1:raise Conflict('Concurrent conversation update detected.')
-        con.execute('UPDATE leads SET updated_at=? WHERE id=?',(iso(),lead_id))
+        # Contact edits explicitly captured by Hermes also update the master
+        # lead row; do not leave an old phone/email visible in the sidebar.
+        contact = state['lead']
+        con.execute('''UPDATE leads SET updated_at=?, first_name=?, last_name=?, email=?, phone=?
+                       WHERE id=?''',
+                    (iso(), contact['first_name'], contact['last_name'],
+                     contact['email'], contact['phone'], lead_id))
         # Preserve the exact IDs from domain.begin_turn/end_turn so each
         # recorded sales fact's source_ref.message_id resolves to this table.
         turn_messages=state['bp_episode']['sales_messages'][-2:]
         if (len(turn_messages)!=2 or turn_messages[0]['role']!='user' or turn_messages[1]['role']!='assistant'
                 or turn_messages[0]['content']!=user_message or turn_messages[1]['content']!=assistant_reply):
             raise Conflict('Conversation evidence does not match the messages being saved.')
-        for msg in turn_messages:
-            con.execute('INSERT INTO messages(id,conversation_id,role,content,created_at) VALUES(?,?,?,?,?)',
-                        (msg['id'],conv_id,msg['role'],msg['content'],msg['created_at']))
+        next_sequence = _next_message_sequence(con, conv_id)
+        for offset, msg in enumerate(turn_messages):
+            con.execute('''INSERT INTO messages(id,conversation_id,role,content,created_at,sequence_number)
+                           VALUES(?,?,?,?,?,?)''',
+                        (msg['id'],conv_id,msg['role'],msg['content'],iso(as_dt(msg['created_at'])),next_sequence+offset))
         sales=state['bp_episode']['leads']['lead_profile_data']['sales_profile']
         facts=list(sales['current'].values())+sales.get('history',[])
         for fact in facts:
