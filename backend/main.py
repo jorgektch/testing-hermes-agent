@@ -188,11 +188,56 @@ def get_lead(lead_id: uuid.UUID, auth: dict=Depends(auth_session)):
     return _public_record(_get_lead(str(lead_id),auth))
 
 
+
+def _hydrate_legacy_context(state: dict, messages: list[dict]) -> None:
+    """Recover property antecedents from pre-v12 persisted messages.
+
+    This repairs history, never infers appointment consent or changes a booking.
+    """
+    from app import conversation_context
+    known=domain._units_by_code()
+    assistants=[m for m in messages if m.get('role')=='assistant']
+    if not state.get('last_assistant_reply') and assistants:
+        state['last_assistant_reply']=str(assistants[-1].get('content') or '')
+    if not state.get('last_presented_units'):
+        for item in reversed(assistants[-8:]):
+            codes=conversation_context.presented_units(str(item.get('content') or ''),known)
+            if codes:
+                state['last_presented_units']=codes
+                break
+    if (state.get('answered_topics') or state.get('confirmation_request') or
+            state.get('pending_media_offer') or state.get('pending_visit_offer')):
+        return
+    previous=assistants[-5:]
+    wrong_confirmation=any(re.search(
+        r'\b(?:confirm again|confirm (?:that|your) (?:interest|you)|'
+        r'need to confirm|confirm one more time)\b',
+        str(x.get('content') or ''),re.I) for x in previous)
+    if not wrong_confirmation:
+        return
+    questions=[m for m in messages[-20:] if m.get('role')=='user' and
+        conversation_context.topic(str(m.get('content') or '')) in
+        ('area','price','bedrooms','bathrooms','kitchen',
+         'backyard','parking','location','availability')]
+    if questions:
+        raw=str(questions[-1].get('content') or '')
+        state['_pending_fact_hint']=conversation_context.topic(raw)
+        state['_pending_factual_request_text']=raw
+
+
 def _begin_turn(state: dict, message: str) -> None:
     # Hermes receives the same authoritative in-memory turn state as its tools.
     # This narrow deterministic guard only accepts unambiguous explicit wishes;
     # all other extraction/decisions remain Hermes's domain tool calls.
     domain.begin_turn(state, message)
+    # Treat an affirmative response to an old details-consent loop as
+    # a request to finish the unanswered factual question, not a booking.
+    if (re.fullmatch(r'\s*(?:yes|yes please|sure)[.!]?\s*',message,re.I)
+            and state.get('_pending_fact_hint') and
+            not state.get('confirmation_request') and
+            not state.get('pending_media_offer') and
+            not state.get('pending_visit_offer')):
+        state['_pending_factual_topic_override']=state['_pending_fact_hint']
     verified = domain.verify_explicit_preferences(state, message)
     if verified.get('error'):
         raise ValueError(verified['error'])
@@ -203,7 +248,8 @@ def _begin_turn(state: dict, message: str) -> None:
     ref=state.get('_turn_property_resolution') or {}
     intent=conversation_context.topic(message)
     if (ref.get('unit_id') and not ref.get('ambiguous') and
-            intent in ('area','price','bedrooms','bathrooms','kitchen',
+            (intent or state.get('_pending_factual_topic_override')) in
+            ('area','price','bedrooms','bathrooms','kitchen',
                        'backyard','parking','location','availability')):
         details=domain.unit_details(state,ref['unit_id'])
         if details.get('ok'):
@@ -300,6 +346,7 @@ def interact(lead_id: uuid.UUID, body: MessageInput, auth: dict=Depends(checked_
     lead_id = str(lead_id)
     rec = _get_lead(lead_id, auth)
     state = copy.deepcopy(rec['state'])
+    _hydrate_legacy_context(state,rec.get('messages') or [])
     if state['turn_count'] >= MAX_TURNS:
         raise HTTPException(429, 'This lead has reached the demo turn limit.')
     try:
@@ -333,6 +380,7 @@ def interact_stream(lead_id: uuid.UUID, body: MessageInput,
         raise HTTPException(429, 'This lead has reached the demo turn limit.')
     message = body.message.strip()
     state = copy.deepcopy(rec['state'])
+    _hydrate_legacy_context(state,rec.get('messages') or [])
 
     def stream():
         try:
