@@ -60,7 +60,7 @@ def connect():
     remote = os.environ.get("TURSO_DATABASE_URL", "").strip()
 
     if remote:
-        token = os.environ.get("TURSO_AUTH_TOKEN", "").strip()
+        token = os.environ.get("TURSO_DATABASE_TURSO_AUTH_TOKEN", "").strip()
 
         if not token:
             raise RuntimeError(
