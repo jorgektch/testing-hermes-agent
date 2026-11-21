@@ -190,7 +190,8 @@ def _suggest_available_assets(state: dict, message: str) -> str:
         remaining=[d for d in media['documents'] if d['url'] not in sent_docs]
         if remaining:
             label=('PDF fact sheet' if any(
-                d.get('type')=='fact_sheet' for d in remaining)
+                (d.get('type')=='fact_sheet' or
+                'fact sheet' in str(d.get('title','')).lower()) for d in remaining)
                 else 'property PDF')
             if label.lower() not in message.lower():
                 suggestions.append(label)
