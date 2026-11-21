@@ -70,7 +70,8 @@ def test_available_slots_and_pending_assignment():
     domain.begin_turn(state, f'I choose {choice["start_time"]} for the H-201 visit.')
     chosen = domain.select_visit_time(state, offer['proposal_id'], choice['date'], choice['start_time'])
     assert chosen['ok'], chosen
-    domain.begin_turn(state, 'Yes, please confirm my visit to H-201 at this hour.')
+    domain.end_turn(state, 'For H-201, please confirm this chosen date and time. Confirm?')
+    domain.begin_turn(state, 'Yes, I confirm')
     res = domain.book_visit(state, 'Alice', 'Morgan', 'alice@example.org', '+51999999999',
                             date_str=choice['date'], start_time=choice['start_time'],
                             proposal_id=offer['proposal_id'], unit_id='H-201')
