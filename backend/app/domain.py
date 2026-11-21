@@ -81,7 +81,12 @@ def blank_state() -> dict:
         },
         'stage': 'New Meta lead',
         'shortlisted_unit_ids': [],
-        'exploring_unit_id': None,  # discussed house, not a visit commitment
+        'exploring_unit_id': None,  # legacy UI projection
+        'conversation_focus': {'project_id': bp['ids']['project_id'],
+                               'unit_id': None, 'ambiguous': False,
+                               'source_message_id': None},
+        'visit_draft': {'unit_id': None, 'date': None, 'start_time': None, 'status': 'idle'},
+        'last_slot_search': None,
         'booked_visits': [],
         'booking_proposal': None,
         'property_interests': [],
@@ -91,6 +96,141 @@ def blank_state() -> dict:
         'turn_count': 0,
         'bp_episode': bp,
     }
+
+
+
+def _units_by_code() -> dict[str, dict]:
+    return {u['unit_id']: u for u in read_catalog()['properties']}
+
+
+def _focus(state: dict) -> dict:
+    """Restore the explicit topic scope for historical lead states."""
+    focus = state.setdefault('conversation_focus', {
+        'project_id': state['bp_episode']['ids']['project_id'],
+        'unit_id': state.get('exploring_unit_id'), 'ambiguous': False,
+        'source_message_id': None,
+    })
+    focus.setdefault('project_id', state['bp_episode']['ids']['project_id'])
+    focus.setdefault('unit_id', state.get('exploring_unit_id'))
+    focus.setdefault('ambiguous', False)
+    return focus
+
+
+def _draft(state: dict) -> dict:
+    """Migrate an older saved appointment offer without changing the appointment."""
+    if 'visit_draft' not in state:
+        proposal = state.get('booking_proposal') or {}
+        code = proposal.get('selected_unit_id')
+        if code in _units_by_code():
+            state['visit_draft'] = {
+                'unit_id': code, 'date': proposal.get('selected_date') or proposal.get('date'),
+                'start_time': proposal.get('selected_start_time'),
+                'status': ('confirmed' if proposal.get('status') == 'confirmed' else
+                           'awaiting_confirmation' if proposal.get('selected_start_time') else 'hour_needed')}
+        else:
+            state['visit_draft'] = {'unit_id': None, 'date': None, 'start_time': None, 'status': 'idle'}
+    return state['visit_draft']
+
+
+def _set_focus(state: dict, code: str, source_message_id: str | None = None) -> None:
+    unit = _units_by_code().get(code)
+    if not unit:
+        return
+    focus = _focus(state)
+    focus.update(project_id=state['bp_episode']['ids']['project_id'],
+                 unit_id=code, ambiguous=False,
+                 source_message_id=source_message_id or state.get('_active_source_message_id'))
+    state['exploring_unit_id'] = code
+    bp = state['bp_episode']
+    bp['ids']['unit_id'] = unit['blackpenguin_unit_id']
+    bp['ids']['property_type_id'] = unit['property_type_id']
+    dialogue = bp['sales_dialogue_states']['state_json']
+    dialogue['selected_unit_id'] = unit['blackpenguin_unit_id']
+    dialogue['selected_property_type_id'] = unit['property_type_id']
+    dialogue['conversation_focus'] = copy.deepcopy(focus)
+
+
+def _set_visit_unit(state: dict, code: str) -> None:
+    if code not in _units_by_code():
+        return
+    draft = _draft(state)
+    if draft.get('unit_id') != code:
+        draft.update(unit_id=code, date=None, start_time=None, status='day_needed')
+        proposal = state.get('booking_proposal')
+        if proposal and proposal.get('selected_unit_id') != code and proposal.get('status') == 'offered':
+            state['booking_proposal'] = None
+            state['bp_episode']['sales_dialogue_states']['state_json']['booking_proposal'] = None
+    elif draft.get('status') == 'idle':
+        draft['status'] = 'day_needed'
+    state['bp_episode']['sales_dialogue_states']['state_json']['visit_draft'] = copy.deepcopy(draft)
+
+
+def _observe_inbound_context(state: dict, message: str) -> None:
+    """Track explicitly discussed houses; never treat a question as booking consent."""
+    known = _units_by_code()
+    mentioned = list(dict.fromkeys(code.upper() for code in re.findall(
+        r'(?<![A-Z0-9])H-\d{3}(?![A-Z0-9])', message.upper()) if code.upper() in known))
+    focus = _focus(state)
+    if len(mentioned) == 1:
+        _set_focus(state, mentioned[0])
+    elif len(mentioned) > 1:
+        focus['ambiguous'] = True
+        state['bp_episode']['sales_dialogue_states']['state_json']['conversation_focus'] = copy.deepcopy(focus)
+    visit_intent = bool(re.search(
+        r'\b(?:visit|tour|book|schedule|appointment|slots|visit times|which hours|what times|see in person|view in person)\b',
+        message, flags=re.I))
+    negated = bool(re.search(r"\b(?:don['’]?t|do not|not|cancel|without)\s+"
+                             r"(?:want to )?(?:visit|tour|book|schedule)\b", message, flags=re.I))
+    affirmative = bool(re.fullmatch(
+        r'\s*(?:yes|yes please|sure|please do|that works|sounds good|ok|okay)[.!]?\s*',
+        message, flags=re.I))
+    offer = state.pop('pending_visit_offer', None)
+    if affirmative and offer and not mentioned and offer.get('unit_id') in known:
+        _set_visit_unit(state, offer['unit_id'])
+        return
+    existing_visit_reference = bool(re.search(
+        r'\b(?:confirm|go ahead|proceed|finalize|reschedule|cancel)\b|'
+        r'\b(?:my|our|the)\s+appointment\b|\bthe visit we discussed\b',
+        message, flags=re.I))
+    if existing_visit_reference and not mentioned and _draft(state).get('unit_id'):
+        return
+    if visit_intent and not negated:
+        target = mentioned[0] if len(mentioned) == 1 else (
+            focus.get('unit_id') if not mentioned and not focus.get('ambiguous') else None)
+        if target:
+            _set_visit_unit(state, target)
+
+
+def _slot_error(code: str, message: str, unit_id: str | None = None,
+                *, next_action: str, **details) -> dict:
+    return {'ok': False, 'error_code': code, 'error': message,
+            'unit_id': unit_id, 'next_action': next_action, **details}
+
+
+def _time_matches(clock: str, preference: str | None) -> bool:
+    hour = int(clock[:2])
+    return (preference in (None, '', 'any') or
+            (preference == 'morning' and hour < 12) or
+            (preference == 'afternoon' and 12 <= hour < 17) or
+            (preference == 'evening' and hour >= 17))
+
+
+def _relative_range(raw: str, today: date) -> tuple[date, date] | None:
+    value = str(raw).strip().lower()
+    if value in ('next week', 'the next week'):
+        monday = today + timedelta(days=7-today.weekday())
+        return monday, monday + timedelta(days=6)
+    if value in ('this week', 'later this week'):
+        return today + timedelta(days=1), today + timedelta(days=6-today.weekday())
+    if value in ('this weekend', 'the weekend'):
+        saturday = today + timedelta(days=(5-today.weekday()) % 7)
+        if saturday <= today:
+            saturday += timedelta(days=7)
+        return saturday, saturday + timedelta(days=1)
+    if value == 'next weekend':
+        saturday = today + timedelta(days=(5-today.weekday()) % 7 + 7)
+        return saturday, saturday + timedelta(days=1)
+    return None
 
 
 def record(state: dict, event: str, label: str) -> None:
@@ -107,6 +247,7 @@ def begin_turn(state: dict, message: str) -> None:
     mid = str(uuid.uuid4())
     state['_active_source_message_id'] = mid
     state['_active_source_message_text'] = message
+    _observe_inbound_context(state, message)
     bp['sales_messages'].append({
         'id': mid, 'conversation_id': bp['ids']['conversation_id'],
         'role': 'user', 'direction': 'inbound', 'channel': 'simulation',
@@ -148,6 +289,15 @@ def end_turn(state: dict, reply: str) -> None:
     state.pop('_approved_media_urls_this_turn', None)
     state.pop('_matching_options_this_turn', None)
     state.pop('_details_for_current_turn', None)
+    state.pop('_slot_queries_this_turn', None)
+    mentioned = list(dict.fromkeys(code.upper() for code in re.findall(
+        r'(?<![A-Z0-9])H-\d{3}(?![A-Z0-9])', reply.upper())))
+    candidate = (mentioned[0] if len(mentioned) == 1 else
+                 _focus(state).get('unit_id') if not mentioned else None)
+    invitation = bool(re.search(r'\b(?:visit|tour|schedule|appointment)\b', reply, re.I))
+    mixed = bool(re.search(r'\b(?:photos?|gallery|images?|pdf|brochure|or choose|or see)\b', reply, re.I))
+    state['pending_visit_offer'] = (
+        {'unit_id': candidate} if candidate and '?' in reply and invitation and not mixed else None)
 
 
 def _capture_bp_facts(state: dict, changed: dict) -> None:
@@ -420,7 +570,7 @@ def unit_details(state: dict, unit_id: str) -> dict:
     selected = state['lead'].get('interest_unit_id') == unit['unit_id']
     if state.get('_active_source_message_id') and not _buyer_mentioned_house(state, unit['unit_id']) and not (focused or selected):
         return {'error': 'Ask which house the buyer wants to explore before loading details.'}
-    state['exploring_unit_id'] = unit['unit_id']
+    _set_focus(state, unit['unit_id'])
     return {'ok': True, 'unit_id': unit['unit_id'],
             'commercial_name': unit['commercial_name'],
             'property_type': unit['property_type'],
@@ -429,6 +579,7 @@ def unit_details(state: dict, unit_id: str) -> dict:
             'area_sqm': unit.get('area_sqm'), 'lot_area_m2': unit.get('lot_area_m2'),
             'confirmed_features': unit.get('confirmed_features', {}),
             'highlights': unit.get('highlights', []),
+            'location': unit.get('location'),
             'status': unit['status'], 'available_from_date': unit['available_from_date'],
             'note': 'Verified information for this house only. Media require separate buyer request.'}
 
@@ -463,64 +614,198 @@ def unit_media(unit_id: str) -> dict:
 def date_input(raw: str | None) -> str | None:
     if not raw:
         return None
-    raw = raw.strip().lower()
-    if raw == 'today':
+    text = str(raw).strip().strip('?.!,').lower()
+    if text == 'today':
         return now_local().date().isoformat()
-    if raw == 'tomorrow':
+    if text == 'tomorrow':
         return (now_local().date() + timedelta(days=1)).isoformat()
     try:
-        return date.fromisoformat(raw).isoformat()
-    except ValueError as exc:
-        raise ValueError('Use YYYY-MM-DD, today or tomorrow.') from exc
+        return date.fromisoformat(text).isoformat()
+    except ValueError:
+        pass
+    # Interpret a clear named date, including "November 27th".
+    stripped = re.sub(r'(?<=\d)(?:st|nd|rd|th)\b', '', text)
+    stripped = re.sub(r'\s+', ' ', stripped.replace(',', ' ')).strip()
+    for fmt in ('%B %d %Y', '%b %d %Y', '%B %d', '%b %d'):
+        try:
+            parsed = datetime.strptime(stripped, fmt)
+            candidate = date(parsed.year, parsed.month, parsed.day)
+            if '%Y' not in fmt:
+                year = now_local().year
+                candidate = date(year, parsed.month, parsed.day)
+                if candidate < now_local().date():
+                    candidate = date(year + 1, parsed.month, parsed.day)
+            return candidate.isoformat()
+        except ValueError:
+            continue
+    raise ValueError('Provide a real date, e.g. November 27 or YYYY-MM-DD.')
 
 
-def slots(state: dict, date_str: str | None = None, *, extra_occupied: dict | None = None) -> dict:
-    """Offer a specific day's hourly starts, never advisor identities.
+def slots(state: dict, date_str: str | None = None, *,
+          time_preference: str | None = None, extra_occupied: dict | None = None) -> dict:
+    """Offer honest slot availability for one explicitly requested visit.
 
-    The lead first explicitly selects a house, then a date. The tool result is
-    safe to show to a buyer; no advisor is assigned before final confirmation.
+    Focus alone is not consent to book. The visit draft survives side questions.
+    Broad date searches report days, not phantom offers or chosen hours.
     """
-    unit_id = state['lead'].get('interest_unit_id')
-    if not unit_id or unit_id not in {u['unit_id'] for u in read_catalog()['properties']}:
-        return {'error': 'Ask the lead to choose one specific available house before proposing an onsite visit.'}
-    if not date_str:
-        return {'error': 'Ask the lead for a specific visit day before searching for hourly start times.'}
-    try:
-        day_str = date_input(date_str)
-        day = date.fromisoformat(day_str)
-    except ValueError as exc:
-        return {'error': str(exc)}
-    previous = state.get('booking_proposal')
-    if (previous and previous.get('status') == 'offered' and
-            previous.get('selected_unit_id') == unit_id and previous.get('date') == day_str and
-            datetime.now(timezone.utc) < datetime.fromisoformat(previous['expires_at'].replace('Z', '+00:00'))):
-        return {'ok': True, 'available_slots': previous['options'],
-                'time_ranges': scheduling.time_ranges(previous['options']),
-                'proposal_id': previous['proposal_id'], 'expires_at': previous['expires_at'],
-                'timezone': scheduling.policy()['timezone'],
-                'note': 'Existing offer, not held. No advisor is assigned.'}
+    known = _units_by_code()
+    draft = _draft(state)
+    unit_id = draft.get('unit_id')
+    previous = state.get('booking_proposal') or {}
+    if not unit_id and previous.get('selected_unit_id') in known:
+        unit_id = previous['selected_unit_id']
+        _set_visit_unit(state, unit_id)
+    if unit_id not in known:
+        focus = _focus(state)
+        return _slot_error(
+            'AMBIGUOUS_PROPERTY', 'Which house would you like to visit?',
+            next_action=('Ask whether to visit ' + str(focus['unit_id']) +
+                         ', the house in focus; do not ask for the property code again.'
+                         if focus.get('unit_id') and not focus.get('ambiguous')
+                         else 'Clarify which single house to visit.'))
+    spoken = str(state.get('_active_source_message_text') or '').lower()
+    if time_preference is None:
+        words = [v for v in ('morning', 'afternoon', 'evening')
+                 if re.search(r'\b' + v + r'\b', spoken)]
+        if len(words) == 1:
+            time_preference = words[0]
+    if time_preference not in (None, '', 'any', 'morning', 'afternoon', 'evening'):
+        return _slot_error('INVALID_TIME_PREFERENCE', 'Unsupported part of the day.',
+                           unit_id, next_action='Use morning, afternoon, evening or any.')
     pol = scheduling.policy()
-    choices = scheduling.available_slots(state, date_filter=day, extra_occupied=extra_occupied)
-    # Offer the date's full range, not just three advisor-specific alternatives.
-    options = scheduling.public_start_times(choices)
+    today = scheduling.local_now().date()
+    low = today + timedelta(days=1)
+    high = today + timedelta(days=pol['booking_horizon_days'])
+    relative = _relative_range(date_str, today) if date_str else None
+    exact_date = None
+    if date_str and not relative:
+        try:
+            exact_date = date.fromisoformat(date_input(date_str))
+        except (ValueError, TypeError):
+            return _slot_error('INVALID_DATE',
+                'Please give a date, for example November 27, or say next week.',
+                unit_id, next_action='Clarify only the date. Do not repeat the house question.')
+        if not low <= exact_date <= high:
+            return _slot_error('DATE_OUTSIDE_HORIZON',
+                'Visits can be offered from tomorrow through ' + high.isoformat() + '.',
+                unit_id, next_action='Choose a day within the available booking window.',
+                allowed_start=low.isoformat(), allowed_end=high.isoformat())
+    if relative:
+        range_start, range_end = max(low, relative[0]), min(high, relative[1])
+        if range_start > range_end:
+            return _slot_error('DATE_OUTSIDE_HORIZON',
+                'The requested period is outside the available booking horizon.',
+                unit_id, next_action='Ask about a date within the published window.',
+                allowed_start=low.isoformat(), allowed_end=high.isoformat())
+    elif exact_date:
+        range_start = range_end = exact_date
+    else:
+        range_start, range_end = low, high
+    key = json.dumps([unit_id, date_str, time_preference], sort_keys=True)
+    queries = state.setdefault('_slot_queries_this_turn', {})
+    if key in queries:
+        repeated = copy.deepcopy(queries[key])
+        repeated['already_checked'] = True
+        repeated['next_action'] = 'Do not call the same search again this turn. Answer using this result.'
+        return repeated
+    try:
+        all_slots = scheduling.available_slots(
+            state, date_filter=exact_date, extra_occupied=extra_occupied)
+    except Exception:
+        result = _slot_error('CALENDAR_UNAVAILABLE',
+            'The appointment calendar could not be checked right now.', unit_id,
+            next_action='Explain the temporary failure without inventing availability.')
+        queries[key] = copy.deepcopy(result)
+        return result
+    def within(item: dict) -> bool:
+        date_value = date.fromisoformat(item['date'])
+        return range_start <= date_value <= range_end and _time_matches(item['start_time'], time_preference)
+    options = scheduling.public_start_times([x for x in all_slots if within(x)])
+    if exact_date is None:
+        days = []
+        for day_value in sorted({x['date'] for x in options})[:4]:
+            day_options = [x for x in options if x['date'] == day_value]
+            ranges = scheduling.time_ranges(day_options)
+            if ranges:
+                days.append({'date': day_value, 'first_start': ranges[0]['first_start'],
+                             'last_start': ranges[-1]['last_start'], 'time_ranges': ranges})
+        if not days:
+            result = _slot_error('NO_SLOTS',
+                'No visit dates match the requested period for ' + unit_id + '.',
+                unit_id, next_action='Ask for another period or time of day; keep the house context.')
+        else:
+            result = {'ok': True, 'unit_id': unit_id, 'available_dates': days,
+                      'proposal_id': None, 'timezone': pol['timezone'],
+                      'next_action': 'Ask which date the buyer prefers for ' + unit_id +
+                                     ', then search that exact day for hours.'}
+        state['last_slot_search'] = {'unit_id': unit_id, 'requested': date_str,
+                                    'time_preference': time_preference,
+                                    'result_code': 'OK' if result.get('ok') else 'NO_SLOTS'}
+        queries[key] = copy.deepcopy(result)
+        return result
+    if not options:
+        state['booking_proposal'] = None
+        dialogue = state['bp_episode']['sales_dialogue_states']['state_json']
+        dialogue['booking_proposal'] = None
+        same_day = scheduling.public_start_times([
+            item for item in all_slots if item['date'] == exact_date.isoformat()])
+        result = _slot_error('NO_SLOTS',
+            f'No {time_preference or "available"} visit times for {unit_id} on {exact_date.isoformat()}.',
+            unit_id,
+            next_action='Offer another available time on this day or ask for another day; do not re-ask the house.',
+            date=exact_date.isoformat(),
+            other_time_ranges=scheduling.time_ranges(same_day)[:5])
+        state['last_slot_search'] = {'unit_id': unit_id, 'requested': date_str,
+                                    'time_preference': time_preference, 'result_code': 'NO_SLOTS'}
+        queries[key] = copy.deepcopy(result)
+        return result
+    if (previous.get('status') == 'offered' and previous.get('selected_unit_id') == unit_id
+            and previous.get('date') == exact_date.isoformat()
+            and previous.get('time_preference') == time_preference):
+        try:
+            if datetime.now(timezone.utc) < datetime.fromisoformat(
+                    previous['expires_at'].replace('Z', '+00:00')):
+                result = {'ok': True, 'unit_id': unit_id, 'date': exact_date.isoformat(),
+                          'available_slots': previous['options'],
+                          'time_ranges': scheduling.time_ranges(previous['options']),
+                          'proposal_id': previous['proposal_id'],
+                          'expires_at': previous['expires_at'], 'timezone': pol['timezone'],
+                          'notice': 'Existing proposal; slots are not reserved.'}
+                queries[key] = copy.deepcopy(result)
+                return result
+        except (KeyError, ValueError, TypeError):
+            pass
     proposal_id = str(uuid.uuid4())
-    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=pol['offer_expiration_minutes'])).isoformat()
-    proposal = {'version': 'hermes-demo/booking-proposal/2.0', 'proposal_id': proposal_id,
-                'status': 'offered', 'selected_unit_id': unit_id, 'date': day_str,
-                'options': options, 'offer_source_message_id': state.get('_active_source_message_id'),
+    expires_at = (datetime.now(timezone.utc) +
+                  timedelta(minutes=pol['offer_expiration_minutes'])).isoformat()
+    proposal = {'version': 'hermes-demo/booking-proposal/2.0',
+                'proposal_id': proposal_id, 'status': 'offered',
+                'selected_unit_id': unit_id, 'date': exact_date.isoformat(),
+                'time_preference': time_preference, 'options': options,
+                'offer_source_message_id': state.get('_active_source_message_id'),
                 'expires_at': expires_at, 'timezone': pol['timezone']}
     state['booking_proposal'] = proposal
+    draft.update(unit_id=unit_id, date=exact_date.isoformat(), status='hour_needed')
     dialogue = state['bp_episode']['sales_dialogue_states']['state_json']
-    dialogue['booking_search'] = {'requested_date': day_str, 'timezone': pol['timezone']}
-    dialogue['booking_proposal'] = copy.deepcopy(proposal) if options else None
+    dialogue['booking_search'] = {'requested_date': exact_date.isoformat(),
+                                  'timezone': pol['timezone'],
+                                  'unit_id': unit_id, 'time_preference': time_preference}
+    dialogue['booking_proposal'] = copy.deepcopy(proposal)
+    dialogue['visit_draft'] = copy.deepcopy(draft)
     state['bp_episode']['sales_dialogue_states']['revision'] += 1
-    record(state, 'slot_offer', f'{len(options)} hourly start times offered for {unit_id} on {day_str}')
-    return {'ok': True, 'unit_id': unit_id, 'date': day_str, 'available_slots': options,
-            'time_ranges': scheduling.time_ranges(options), 'proposal_id': proposal_id,
-            'expires_at': expires_at, 'timezone': pol['timezone'],
-            'visit_duration_minutes': pol['visit_duration_minutes'],
-            'buffer_minutes': pol['buffer_after_minutes'],
-            'notice': 'No advisor assigned. Options are not reserved and expire; confirm a single start time in a later lead turn.'}
+    state['last_slot_search'] = {'unit_id': unit_id, 'requested': date_str,
+                                'time_preference': time_preference, 'result_code': 'OK'}
+    record(state, 'slot_offer',
+           f'{len(options)} hourly start times offered for {unit_id} on {exact_date.isoformat()}')
+    result = {'ok': True, 'unit_id': unit_id, 'date': exact_date.isoformat(),
+              'available_slots': options, 'time_ranges': scheduling.time_ranges(options),
+              'proposal_id': proposal_id, 'expires_at': expires_at,
+              'timezone': pol['timezone'],
+              'visit_duration_minutes': pol['visit_duration_minutes'],
+              'buffer_minutes': pol['buffer_after_minutes'],
+              'notice': 'No advisor assigned and no option is held. Buyer must select an hour and confirm later.'}
+    queries[key] = copy.deepcopy(result)
+    return result
 
 
 def redact_unconfirmed_advisor_names(reply: str, state: dict) -> str:
@@ -572,6 +857,10 @@ def select_visit_time(state: dict, proposal_id: str, date_str: str, start_time: 
         return {'error': 'Ask the lead to explicitly choose a clock time, such as 9 AM.'}
     proposal.update(selected_start_time=parsed_time, selected_date=parsed_day,
                     selected_source_message_id=state.get('_active_source_message_id'))
+    draft = _draft(state)
+    draft.update(unit_id=proposal['selected_unit_id'], date=parsed_day,
+                 start_time=parsed_time, status='awaiting_confirmation')
+    state['bp_episode']['sales_dialogue_states']['state_json']['visit_draft'] = copy.deepcopy(draft)
     record(state, 'hour_selected', f'Lead chose {parsed_day} {parsed_time} for {proposal["selected_unit_id"]}')
     return {'ok': True, 'date': parsed_day, 'start_time': parsed_time,
             'unit_id': proposal['selected_unit_id'],
@@ -593,7 +882,7 @@ def track_property_interest(state: dict, unit_id: str, status: str = 'discussed'
         words = str(state.get('_active_source_message_text') or '').lower()
         # Merely asking for information or photos is NOT visit intent.
         visit_intent = re.search(r'\b(visit|tour|book|schedule|see in person|appointment|choose|select|pick|want|interested|like|prefer)\b', words)
-        if not visit_intent and state['lead'].get('interest_unit_id') != unit_id:
+        if not visit_intent and _draft(state).get('unit_id') != unit_id and state['lead'].get('interest_unit_id') != unit_id:
             return {'error': 'Asking about a house is not permission to select it for a visit.'}
     existing = state.setdefault('property_interests', [])
     # A mention cannot downgrade a prior explicit interest.
@@ -608,7 +897,11 @@ def track_property_interest(state: dict, unit_id: str, status: str = 'discussed'
     if status == 'interested':
         state['lead']['interest_unit_id'] = unit_id
     if _buyer_mentioned_house(state, unit_id) or status == 'interested':
-        state['exploring_unit_id'] = unit_id
+        _set_focus(state, unit_id)
+    if status == 'interested' and re.search(
+            r'\b(?:visit|tour|book|schedule|appointment|see in person)\b',
+            str(state.get('_active_source_message_text') or ''), flags=re.I):
+        _set_visit_unit(state, unit_id)
     return {'ok': True, 'property_interests': existing,
             'active_unit_id': state['lead'].get('interest_unit_id')}
 
@@ -658,7 +951,10 @@ def update_lead(state: dict, **kwargs: Any) -> dict:
                 return {'error': f'Unknown available unit: {value}'}
             if state.get('_active_source_message_id') and value != lead.get('interest_unit_id'):
                 spoken = str(state.get('_active_source_message_text') or '').lower()
-                if not _buyer_mentioned_house(state, str(value)) or not re.search(
+                contextual = (_focus(state).get('unit_id') == value and
+                              not _focus(state).get('ambiguous') and
+                              not any(code.lower() in spoken for code in _units_by_code() if code != value))
+                if not (_buyer_mentioned_house(state, str(value)) or contextual) or not re.search(
                         r'\b(visit|tour|book|schedule|see in person|appointment|choose|select|pick|want|interested|like|prefer)\b', spoken):
                     return {'error': 'A question about a house is not explicit visit selection.'}
         if key == 'budget_currency':
@@ -705,6 +1001,8 @@ def update_lead(state: dict, **kwargs: Any) -> dict:
                     del merged[alias]
             merged[field]=value
         _capture_bp_facts(state, merged)
+        if changed.get('interest_unit_id'):
+            _set_focus(state, changed['interest_unit_id'])
         if lead.get('budget_usd') and lead.get('purchase_timeframe'):
             state['stage']='Qualified lead'
         if lead.get('interest_unit_id'):
@@ -816,8 +1114,10 @@ def book_visit(state: dict, first_name: str, last_name: str, email: str,
     chosen = unit_id or state['lead'].get('interest_unit_id')
     if not chosen or chosen not in units or chosen != proposal['selected_unit_id']:
         return {'error': 'Explicitly select one available house before confirming its visit.'}
-    if state['lead'].get('interest_unit_id') != chosen:
-        return {'error': 'The lead must explicitly identify the house to visit.'}
+    if _draft(state).get('unit_id') != chosen:
+        return {'error': 'The visit draft does not identify this house. Confirm the chosen house first.'}
+    if (_draft(state).get('date') != day or _draft(state).get('start_time') != start_time):
+        return {'error': 'The chosen date and hour must match the visit awaiting confirmation.'}
     if not all(isinstance(x, str) and x.strip() for x in (first_name, last_name, email, phone)):
         return {'error': 'First name, last name, email and phone are required.'}
     choices = scheduling.available_slots(state, date_filter=date.fromisoformat(day), extra_occupied=extra_occupied)
@@ -833,6 +1133,7 @@ def book_visit(state: dict, first_name: str, last_name: str, email: str,
     meeting_id = str(uuid.uuid4()); operation_id = str(uuid.uuid4())
     bp = state['bp_episode']; project = read_catalog()['project_info']
     # Synthetic location must not produce a real Google Maps pin.
+    property_location = selected.get('location') or {}
     visit_location = {'label': 'Synthetic project showroom',
                       'address': project['location']['street_address'],
                       'verification_status': 'synthetic', 'maps_url': None,
@@ -854,7 +1155,8 @@ def book_visit(state: dict, first_name: str, last_name: str, email: str,
                'property_type_name': selected['commercial_name'],
                'unit_id': selected['blackpenguin_unit_id'], 'unit_code': selected['unit_id'],
                'timezone': pol['timezone'], 'property_association': 'explicit',
-               'visit_location': visit_location}
+               'visit_location': visit_location,
+               'property_location': copy.deepcopy(property_location)}
     meeting = {'id': meeting_id, 'project_id': bp['ids']['project_id'],
                'lead_id': bp['ids']['lead_id'], 'broker_id': None,
                'assigned_sales_user_id': None,
@@ -884,6 +1186,7 @@ def book_visit(state: dict, first_name: str, last_name: str, email: str,
     bp['sales_booking_operations'].append(operation)
     state['booked_visits'].append(booking)
     proposal['status'] = 'pending_assignment'; proposal['meeting_id'] = meeting_id
+    _draft(state)['status'] = 'pending_commit'
     bp['sales_dialogue_states']['state_json']['booking_proposal'] = None
     record(state, 'booking_pending', f'Awaiting transactional assignment for {chosen} {day} {start_time}')
     return {'ok': True, 'pending_commit': True, 'unit_id': chosen, 'date': day,
@@ -967,6 +1270,9 @@ def profile_snapshot(state: dict) -> dict:
         'lead': dict(state.get('lead') or {}),
         'stage': state.get('stage'),
         'exploring_unit_id': state.get('exploring_unit_id'),
+        'conversation_focus': copy.deepcopy(_focus(state)),
+        'visit_draft': copy.deepcopy(_draft(state)),
+        'last_slot_search': copy.deepcopy(state.get('last_slot_search')),
         'property_interests': list(state.get('property_interests') or []),
         'ui_fact_evidence': dict(state.get('ui_fact_evidence') or {}),
         'facts': {k: dict(v) for k,v in facts.items()},

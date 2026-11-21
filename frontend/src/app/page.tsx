@@ -6,14 +6,14 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import SalesCalendar from './calendar';
 
-type Unit={unit_id:string;blackpenguin_unit_id:string;property_type_id:string;property_type:'Apartment'|'House';commercial_name:string;property_type_code?:string;property_type_description?:string;bedrooms:number;bathrooms:number;area_sqm:number;lot_area_m2?:number|null;floor_number?:number|null;price_usd:number;currency?:string;available_from_date:string;status:string;confirmed_features?:Record<string,string|number|boolean>;highlights:string[];media:{gallery_urls:string[];gallery_url:string|null;floorplan_brochure_pdf:string|null;documents:{type:string;title:string;url:string;scope:'unit';unit_id:string}[]};demo_inventory_last_updated_at?:string;publication_status?:string;inventory_is_live?:boolean;phase_id?:string;phase_name?:string;property_model?:{model_name:string;code:string;bedrooms?:number;bathrooms?:number;built_area_min_m2?:number;built_area_max_m2?:number;lot_area_min_m2?:number;lot_area_max_m2?:number;total_units?:number;review_status?:string;inventory_updated_at?:string;verified_type_features?:{feature_key:string;verification_status:string;value_text?:string;value_number?:string;value_bool?:boolean}[]};};
+type Unit={location?:{address?:string;city?:string;country?:string;district?:string|null;maps_url?:string|null;map_scope?:string;verification_status?:string;note?:string};unit_id:string;blackpenguin_unit_id:string;property_type_id:string;property_type:'Apartment'|'House';commercial_name:string;property_type_code?:string;property_type_description?:string;bedrooms:number;bathrooms:number;area_sqm:number;lot_area_m2?:number|null;floor_number?:number|null;price_usd:number;currency?:string;available_from_date:string;status:string;confirmed_features?:Record<string,string|number|boolean>;highlights:string[];media:{gallery_urls:string[];gallery_url:string|null;floorplan_brochure_pdf:string|null;documents:{type:string;title:string;url:string;scope:'unit';unit_id:string}[]};demo_inventory_last_updated_at?:string;publication_status?:string;inventory_is_live?:boolean;phase_id?:string;phase_name?:string;property_model?:{model_name:string;code:string;bedrooms?:number;bathrooms?:number;built_area_min_m2?:number;built_area_max_m2?:number;lot_area_min_m2?:number;lot_area_max_m2?:number;total_units?:number;review_status?:string;inventory_updated_at?:string;verified_type_features?:{feature_key:string;verification_status:string;value_text?:string;value_number?:string;value_bool?:boolean}[]};};
 type Catalog={project_info:{name:string;developer:string;project_type?:string;development_status?:string;short_description?:string;long_description?:string;project_code?:string;value_proposition:string;amenities:string[];phase_names?:string[];published_revision?:number;inventory_summary?:{total_units:number;available_units:number;reserved_units:number};general_brochure_pdf:string;location:{street_address:string;city:string;country:string;timezone?:string}};properties:Unit[]};
 type Fact={id:string;field:string;value:unknown;status:string;source:string;evidence?:string;captured_at?:string;source_ref?:{message_id?:string}};
 type Booking={meeting_id:string;advisor_name:string|null;unit_id:string|null;date:string;start_time:string;end_time:string;status:string;visit_location?:{label:string;address?:string;maps_url:string|null;verification_status:string}};
-type State={exploring_unit_id?:string|null;ui_fact_evidence?:Record<string,Evidence>;tool_observations?:ToolObservation[];lead:{first_name:string|null;last_name:string|null;phone:string|null;email:string|null;budget_usd:number|null;purchase_timeframe:string|null;property_type:string|null;min_bedrooms:number|null;interest_unit_id:string|null};stage:string;turn_count:number;shortlisted_unit_ids:string[];booked_visits:Booking[];property_interests?:{unit_id:string;status:string;source_message_id?:string}[];booking_proposal?:{proposal_id:string;status:string;expires_at:string;options:{date:string;start_time:string}[]}|null;bp_episode?:{leads:{lead_profile_data:{sales_profile:{current:Record<string,Fact>}}}}};
+type State={conversation_focus?:{project_id?:string;unit_id?:string|null;ambiguous?:boolean};visit_draft?:{unit_id?:string|null;date?:string|null;start_time?:string|null;status?:string};last_slot_search?:{result_code?:string;requested?:string};exploring_unit_id?:string|null;ui_fact_evidence?:Record<string,Evidence>;tool_observations?:ToolObservation[];lead:{first_name:string|null;last_name:string|null;phone:string|null;email:string|null;budget_usd:number|null;purchase_timeframe:string|null;property_type:string|null;min_bedrooms:number|null;interest_unit_id:string|null};stage:string;turn_count:number;shortlisted_unit_ids:string[];booked_visits:Booking[];property_interests?:{unit_id:string;status:string;source_message_id?:string}[];booking_proposal?:{proposal_id:string;status:string;expires_at:string;options:{date:string;start_time:string}[]}|null;bp_episode?:{leads:{lead_profile_data:{sales_profile:{current:Record<string,Fact>}}}}};
 type Evidence={source_message_id?:string;message_id?:string;captured_at?:string;evidence?:string;source?:string};
-type ToolObservation={tool:string;status:string;fields:string[];timestamp:string;message_id?:string};
-type ProfilePreview={lead:State['lead'];stage:string;exploring_unit_id?:string|null;property_interests:NonNullable<State['property_interests']>;facts:Record<string,Fact>;ui_fact_evidence:Record<string,Evidence>;tool_observations:ToolObservation[]};
+type ToolObservation={tool:string;status:string;fields:string[];timestamp:string;message_id?:string;error_code?:string|null};
+type ProfilePreview={lead:State['lead'];stage:string;conversation_focus?:State['conversation_focus'];visit_draft?:State['visit_draft'];last_slot_search?:State['last_slot_search'];exploring_unit_id?:string|null;property_interests:NonNullable<State['property_interests']>;facts:Record<string,Fact>;ui_fact_evidence:Record<string,Evidence>;tool_observations:ToolObservation[]};
 type Message={id:string;role:'user'|'assistant';content:string;created_at:string;sequence_number?:number};
 type Lead={id:string;conversation_id:string;first_name:string;last_name:string;email:string;phone:string;updated_at:string;created_at:string;revision:number;state:State;messages:Message[]};
 type Summary={id:string;conversation_id:string;first_name:string;last_name:string;updated_at:string;last_message:string|null};
@@ -62,7 +62,17 @@ function safeLink(href:string|undefined){
     return (u.protocol==='https:'||(u.protocol==='http:'&&u.hostname==='localhost'&&typeof window!=='undefined'&&u.origin===window.location.origin))&&trustedHost&&(/^\/properties\/[A-Za-z0-9-]+\/gallery\/?$/.test(u.pathname)||/^\/demo-assets\/[A-Za-z0-9_.-]+\.pdf$/i.test(u.pathname))&&!u.search&&!u.hash;
   }catch{return false;}
 }
-function ChatMarkdown({text}:{text:string}){return <Markdown remarkPlugins={[remarkGfm]} components={{a:({href,children})=>safeLink(href)?<a href={href} target="_blank" rel="noopener noreferrer">{children}</a>:<span title="External or unapproved link hidden">{children}</span>}}>{text}</Markdown>}
+function safeMapsLink(href:string|undefined){
+  if(!href)return false;
+  try{
+    const u=new URL(href);
+    return u.protocol==='https:'&&u.hostname==='www.google.com'&&
+      u.pathname==='/maps/search/'&&u.searchParams.get('api')==='1'&&
+      Boolean(u.searchParams.get('query'))&&
+      [...u.searchParams.keys()].every(k=>k==='api'||k==='query');
+  }catch{return false;}
+}
+function ChatMarkdown({text}:{text:string}){return <Markdown remarkPlugins={[remarkGfm]} components={{a:({href,children})=>(safeLink(href)||safeMapsLink(href))?<a href={href} target="_blank" rel="noopener noreferrer">{children}</a>:<span title="External or unapproved link hidden">{children}</span>}}>{text}</Markdown>}
 function PropertyDetails({unit,project,onClose}:{unit:Unit;project:Catalog['project_info'];onClose:()=>void}){
   const [photo,setPhoto]=useState(0);
   const img=unit.media.gallery_urls;
@@ -88,6 +98,12 @@ function PropertyDetails({unit,project,onClose}:{unit:Unit;project:Catalog['proj
       </div></>}
       <h3>Property type description</h3><p>{unit.property_type_description||'No confirmed description available.'}</p>
       <h3>Verified property features</h3><div className="detail-grid">{Object.keys(unit.confirmed_features||{}).length?Object.entries(unit.confirmed_features||{}).map(([key,val])=><Field key={key} label={key.replaceAll('_',' ')} value={val}/>):<p>No verified features are published.</p>}</div>
+      <h3>House location (synthetic reference)</h3><div className="detail-grid">
+        <Field label="Location" value={unit.location?.address||'Not provided'}/>
+        <Field label="City" value={unit.location?.city||'Not specified'}/>
+        <Field label="Map precision" value={unit.location?.map_scope||'Unknown'}/>
+      </div>
+      {safeMapsLink(unit.location?.maps_url||undefined)&&<p className="fineprint"><a href={unit.location?.maps_url||'#'} target="_blank" rel="noopener noreferrer"><MapPin size={14}/> View illustrative city reference in Google Maps</a> — not an exact house pin or visit address.</p>}
       <h3>Project amenities</h3><div className="amenities-inline">{project.amenities.map(a=><span key={a}>{a}</span>)}</div>
       <h3>Gallery & property documents</h3><div className="asset-links">{unit.media.gallery_url?<a href={unit.media.gallery_url} target="_blank" rel="noopener noreferrer"><Images size={14}/> View gallery ({img.length})</a>:<span>No property gallery published</span>}{unit.media.documents.length?unit.media.documents.filter(d=>d.scope==='unit'&&d.unit_id===unit.blackpenguin_unit_id).map(doc=><a key={doc.url} href={doc.url} target="_blank" rel="noopener noreferrer"><FileText size={14}/> {doc.title}</a>):<span>No property PDF published</span>}</div>
       <h3>Project context</h3><div className="detail-grid"><Field label="Developer" value={project.developer}/><Field label="Development status" value={project.development_status}/><Field label="Project type" value={project.project_type}/><Field label="Location" value={`${project.location.street_address}, ${project.location.city}`}/></div>
@@ -118,6 +134,8 @@ export default function Page(){
   const turnLimit=auth?.max_turns||MAX_TURNS;
   const turnLimitReached=(state?.turn_count ?? 0)>=turnLimit;
   const viewLead=liveProfile?.lead||state?.lead;
+  const conversationFocus=liveProfile?.conversation_focus||state?.conversation_focus;
+  const visitDraft=liveProfile?.visit_draft||state?.visit_draft;
   const profileFacts=liveProfile?.facts||state?.bp_episode?.leads?.lead_profile_data?.sales_profile?.current||{};
   const profileEvidence=liveProfile?.ui_fact_evidence||state?.ui_fact_evidence||{};
   const interests=liveProfile?.property_interests||state?.property_interests||[];
@@ -288,11 +306,15 @@ export default function Page(){
             <section className="state-section"><h3>Project focus</h3>
               <div className="state-kv"><span>Project</span><strong>{catalog?.project_info.name||'Not available'}</strong></div>
               <div className="state-kv"><span>Operation</span><strong>House sale</strong></div>
-              <div className="state-kv"><span>Exploring</span><strong>{liveProfile?.exploring_unit_id??state.exploring_unit_id??'Not yet chosen'}</strong></div>
-              <div className="state-kv"><span>House selected for visit</span><strong>{viewLead?.interest_unit_id||'Not selected'}</strong></div>
+              <div className="state-kv"><span>Exploring</span><strong>{conversationFocus?.unit_id??liveProfile?.exploring_unit_id??state.exploring_unit_id??'Not yet chosen'}</strong></div>
+              <div className="state-kv"><span>House selected for visit</span><strong>{visitDraft?.unit_id||'Not selected'}</strong></div>
+              {visitDraft?.date&&<div className="state-kv"><span>Requested visit date</span><strong>{visitDraft.date}</strong></div>}
+              {visitDraft?.start_time&&<div className="state-kv"><span>Requested visit time</span><strong>{visitDraft.start_time}</strong></div>}
+              {visitDraft?.status&&visitDraft.status!=='idle'&&<div className="state-kv"><span>Visit planning</span><strong>{visitDraft.status.replaceAll('_',' ')}</strong></div>}
+              {state.last_slot_search?.result_code&&state.last_slot_search.result_code!=='OK'&&<small className="muted">Last calendar check: {state.last_slot_search.result_code}</small>}
               {state.shortlisted_unit_ids.length>0&&<small className="muted">Matching houses: {state.shortlisted_unit_ids.join(', ')}</small>}
               {interests.length>0&&<div className="interest-list">{interests.map(i=><button key={i.unit_id} onClick={()=>{const u=catalog?.properties.find(u=>u.unit_id===i.unit_id);if(u)setSelected(u)}}><span>{i.unit_id}</span><small>{i.status}</small><ChevronRight size={13}/></button>)}</div>}
-              <div className="focus-location"><MapPin size={13}/><span>{viewLead?.interest_unit_id?`Visit location: ${catalog?.project_info.location.street_address||'Pending verification'}`:'Select a house before booking a visit.'}<small>Synthetic address; no verified Maps destination.</small></span></div>
+              <div className="focus-location"><MapPin size={13}/><span>{visitDraft?.unit_id?`Visit house ${visitDraft.unit_id}: ${catalog?.properties.find(p=>p.unit_id===visitDraft.unit_id)?.location?.city||'Unspecified city'} (city-level reference)`:'Select a house before booking a visit.'}<small>Synthetic reference; no verified house pin or actual physical destination.</small></span></div>
             </section>
             {additionalFacts.length>0&&<section className="state-section"><h3>Other captured commercial facts</h3>
               {additionalFacts.map(f=><FactRow key={f.id} label={f.field.replaceAll('_',' ')} value={f.value}
@@ -300,7 +322,7 @@ export default function Page(){
             </section>}
             {observations.length>0&&<details className="inspector"><summary>Capture activity · Hermes tools and validation ({observations.length})</summary>
               {observations.slice(-8).map((o,i)=><div className="evidence-line" key={`${o.timestamp}-${i}`}>
-                <strong>{o.tool} · {o.status}</strong><small>{o.fields.join(', ')} · {formatChatTimestamp(o.timestamp,timeZone)}</small>
+                <strong>{o.tool} · {o.status}{o.error_code?` · ${o.error_code}`:''}</strong><small>{o.fields.join(', ')} · {formatChatTimestamp(o.timestamp,timeZone)}</small>
               </div>)}
             </details>}
             <section className="state-section"><h3>Appointment</h3>{currentBooking?<div className="appointment-card"><div className="status-line"><Check size={13}/> Confirmed · Demo only</div><strong>{currentBooking.date} · {currentBooking.start_time}–{currentBooking.end_time}</strong><small>{currentBooking.advisor_name||'Advisor assignment pending'}</small><small>{currentBooking.unit_id||'Unlinked legacy appointment'}</small>{currentBooking.visit_location&&<small>{currentBooking.visit_location.address} · Fictional demo location</small>}</div>:<div className="no-appointment">No confirmed appointment</div>}{state.booking_proposal?.status==='offered'&&<div className="offer-summary"><small>Offered · not booked · expires {new Date(state.booking_proposal.expires_at).toLocaleTimeString()}</small>{state.booking_proposal.options.map(opt=><div key={`${opt.date}-${opt.start_time}`}>{opt.date} {opt.start_time}</div>)}</div>}{state.booked_visits.filter(b=>b.status!=='confirmed').length>0&&<details className="inspector"><summary>Previous visits</summary>{state.booked_visits.filter(b=>b.status!=='confirmed').map(b=><div className="state-kv" key={b.meeting_id}><span>{b.date}</span><strong>{b.status}</strong></div>)}</details>}</section>

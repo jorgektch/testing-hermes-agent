@@ -453,6 +453,9 @@ def _assign_round_robin(con, state: dict, row: dict) -> dict:
                 operation['snapshot_json']['option']['sales_user_id'] = user['id']
         if state.get('booking_proposal', {}).get('meeting_id') == row['id']:
             state['booking_proposal']['status'] = 'confirmed'
+        if state.get('visit_draft', {}).get('unit_id') == booking['unit_id']:
+            state['visit_draft']['status'] = 'confirmed'
+            state['bp_episode']['sales_dialogue_states']['state_json']['visit_draft'] = copy.deepcopy(state['visit_draft'])
         state['stage'] = 'Visit booked · simulated'
         state['bp_episode']['leads']['funnel_stage'] = 'appointment_set'
         state['bp_episode']['leads']['pipeline_stage'] = 'S04_APPOINTMENT'
