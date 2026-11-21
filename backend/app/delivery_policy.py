@@ -43,6 +43,75 @@ def _matching_reply(matches: list[dict], alternatives: list[dict] | None = None)
     return f'I found {len(matches)} matching house(s). Which one would you like to explore?'
 
 
+
+def _no_matches_for_state(state: dict) -> str:
+    """Catalog-grounded commercial reply; hard buyer limits stay unchanged."""
+    prefs=(state.get('active_search') or {}).get('effective_preferences') or state.get('search_preferences') or {}
+    budget=prefs.get('budget') or {}
+    bedrooms=prefs.get('bedrooms') or {}
+    cap=budget.get('maximum_usd')
+    beds=bedrooms.get('preferred') or bedrooms.get('minimum')
+    requested=(f'{beds}-bedroom house' if beds else 'house')
+    scope=(f' within your ${int(cap):,} budget' if cap is not None else
+           ' matching those preferences')
+    intro=f"We don't currently have a {requested}{scope}."
+    ranked=state.get('_search_out_of_budget_this_turn') or []
+    ranked=sorted(ranked,key=lambda u:(
+        int(beds is not None and u['bedrooms']!=beds),
+        int(u.get('exceeds_budget_by_usd') or 0),
+        int(u['price_usd']),u['unit_id']))
+    if cap is not None and ranked:
+        alternative=ranked[0]
+        delta=int(alternative['price_usd'])-int(cap)
+        if delta>0:
+            other_beds=(f'{alternative["bedrooms"]}-bedroom ' if
+                        beds and alternative['bedrooms']!=beds else '')
+            return (f'{intro} The lowest-priced {other_beds}alternative is '
+                    f'{alternative["unit_id"]} at ${int(alternative["price_usd"]):,}, '
+                    f'${delta:,} above your limit. '
+                    'Would you like to see it as an alternative, or keep your budget unchanged?')
+    return intro+' Would you like to adjust a criterion?'
+
+
+_TECHNICAL_REPLY=re.compile(
+    r'\b(?:system (?:requires|issue|error)|technical (?:issue|difficulty|error)|'
+    r'(?:difficulty|trouble|problem) (?:retrieving|accessing|fetching)|'
+    r'unable to (?:retrieve|access|fetch) (?:properties|inventory)|'
+    r'constraints for filtering|try(?:ing)? (?:the )?search again|'
+    r'confirm that you want to keep the preference|'
+    r'(?:internal|validation|tool|backend) error)\b',re.I)
+
+
+def _search_answer_needs_repair(plain: str, state: dict, matches: list[dict]) -> bool:
+    if _TECHNICAL_REPLY.search(plain):
+        return True
+    codes={c.upper() for c in re.findall(r'\bH-\d+\b',plain,re.I)}
+    valid={u['unit_id'] for u in matches}
+    extras=set(state.get('_allowed_alternative_units_this_turn') or [])
+    closest=state.get('_search_nearest_out_of_budget_this_turn') or {}
+    if not matches and closest.get('unit_id'):
+        extras.add(closest['unit_id'])
+    if codes-valid-extras:
+        return True
+    if not matches:
+        # A no-match answer can offer one verified closest option without
+        # relaxing the hard cap. Require that disclosure if one exists.
+        if closest.get('unit_id') and closest['unit_id'] not in codes:
+            return True
+        if not re.search(
+            r'\b(?:no (?:houses?|homes?|properties|matches|listings|options)|'
+            r"don.t (?:currently )?have|do not (?:currently )?have|"
+            r"couldn.t find|cannot find|can't find|none (?:meet|match)|"
+            r'not (?:currently )?available)\b',plain,re.I):
+            return True
+        if codes.intersection(extras) and not re.search(
+            r'\b(?:above|over|exceeds|outside|alternative|more than|higher)\b',
+            plain,re.I):
+            return True
+    return False
+
+
+
 def _pending_visit_recap(state: dict) -> str:
     draft=state.get('visit_draft') or {}
     name=draft.get('unit_id') or 'the selected house'
@@ -85,7 +154,7 @@ def _verified_fact_reply(state: dict, plain: str) -> str | None:
     question=str(state.get('_active_source_message_text') or '')
     # A price mention inside an alternative search is NOT a question about
     # the previously discussed property's price.
-    if state.get('_turn_intent') in ('property_search','property_comparison'):
+    if state.get('_turn_intent') in ('property_search','property_comparison','preference_update'):
         return None
     topic=conversation_context.topic(question) or state.get('_pending_factual_topic_override')
     original_question=state.get('_pending_factual_request_text') or question
@@ -221,9 +290,11 @@ def validate_outbound(reply: str, state: dict) -> str:
     allowed = set(state.get('_approved_media_urls_this_turn') or [])
     unauthorised = [url for url in _urls(plain) if url not in allowed]
     search_results = state.get('_matching_options_this_turn')
+    commercial_search=state.get('_turn_intent') in ('property_search','preference_update')
     if unauthorised:
         if search_results is not None:
-            return _matching_reply(search_results)
+            return (_no_matches_for_state(state) if not search_results
+                    else _matching_reply(search_results))
         # Do not turn a bad link into a plausible but unverifiable address.
         raise ValueError('Hermes returned a URL not authorized by the domain media tool.')
     # The language model cannot promote a selected hour to a confirmed visit.
@@ -234,7 +305,7 @@ def validate_outbound(reply: str, state: dict) -> str:
                 state['_booking_completion_error'] +
                 ' Your existing appointment, if any, is unchanged. Can I check another time?')
     if (draft.get('status')=='awaiting_confirmation' and
-            state.get('_turn_intent') not in ('property_search','property_comparison')):
+            state.get('_turn_intent') not in ('property_search','property_comparison','preference_update')):
         false_claim=bool(re.search(
             r"\b(?:is confirmed|has been confirmed|i(?:'ve| have) (?:booked|scheduled)|"
             r"your visit is booked|your booking is confirmed)\b",plain,re.I))
@@ -246,7 +317,7 @@ def validate_outbound(reply: str, state: dict) -> str:
     # A missing/incorrect Hermes search-tool call must not return the price
     # of the *previously* discussed home. Recover from server-verified catalog
     # only when the buyer clearly requested a new search.
-    if state.get('_turn_intent')=='property_search' and search_results is None:
+    if commercial_search and search_results is None:
         from . import domain
         outcome=domain.search_properties(state)
         if outcome.get('ok'):
@@ -257,15 +328,11 @@ def validate_outbound(reply: str, state: dict) -> str:
                 'fields':['property_search'],
                 'message_id':state.get('_active_source_message_id'),
                 'timestamp':domain.now_local().isoformat()})
-    if state.get('_turn_intent')=='property_search' and search_results is not None:
-        names={c.upper() for c in re.findall(r'\bH-\d+\b',plain,re.I)}
-        matches={u['unit_id'] for u in search_results}
-        allowed=set(state.get('_allowed_alternative_units_this_turn') or [])
-        if (state.get('_automatic_search_recovery') or
-                bool(names-matches-allowed) or
-                (not matches and not re.search(
-                    r'\b(?:no (?:matches|houses|options)|none|no properties)\b',plain,re.I))):
-            return _matching_reply(search_results)
+    if commercial_search and search_results is not None:
+        if state.get('_automatic_search_recovery') or _search_answer_needs_repair(
+                plain,state,search_results):
+            return (_no_matches_for_state(state) if not search_results
+                    else _matching_reply(search_results))
     repaired=_verified_fact_reply(state,plain)
     if repaired is not None:
         state['_fact_answer_repaired_this_turn']=True
@@ -279,10 +346,15 @@ def validate_outbound(reply: str, state: dict) -> str:
         names={x.upper() for x in re.findall(r'\bH-\d+\b',plain,re.I)}
         matches={u['unit_id'] for u in search_results}
         alternatives=set(state.get('_allowed_alternative_units_this_turn') or [])
+        if commercial_search and not search_results:
+            closest=state.get('_search_nearest_out_of_budget_this_turn') or {}
+            if closest.get('unit_id'):
+                alternatives.add(closest['unit_id'])
         if (not names.issubset(matches|alternatives) or
                 sms.details(plain)['segments']>2 or
                 (bool(names.intersection(alternatives)) and not re.search(
                     r'\b(?:optional|alternative|different|extra)\b',plain,re.I))):
-            return _matching_reply(search_results)
+            return (_no_matches_for_state(state) if not search_results
+                    else _matching_reply(search_results))
     _record_sent_media(state,plain)
     return _suggest_available_assets(state,plain)

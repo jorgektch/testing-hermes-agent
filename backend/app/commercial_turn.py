@@ -118,6 +118,11 @@ def intent(message: str) -> str:
         return 'property_search'
     if _BOOKING.search(text):
         return 'booking_action'
+    # Explicit revisions are a commercial operation, not a public-property
+    # detail. A successful update must trigger a fresh catalog search.
+    from . import sales_preferences
+    if sales_preferences.parse_declarations(text):
+        return 'preference_update'
     if _ASSETS.search(text):
         return 'property_assets'
     if _SLOTS.search(text):
@@ -137,6 +142,13 @@ def extracted_criteria(message: str) -> dict:
         else:
             c['bedrooms_any']=sorted(set(parsed_counts))
     lower=str(message or '').lower()
+    from . import sales_preferences
+    declared=sales_preferences.parse_declarations(message)
+    budget=declared.get('budget') or {}
+    if budget.get('maximum_usd') is not None:
+        c['max_price_usd']=budget['maximum_usd']
+    if budget.get('minimum_usd') is not None:
+        c['min_price_usd']=budget['minimum_usd']
     maximum=re.search(r'\b(?:under|up to|below|maximum|max|at most|less than)\s*\$?\s*(\d+(?:,\d{3})*(?:\.\d+)?)\s*(k|m)?\b',lower)
     if maximum:
         value=float(maximum.group(1).replace(',',''))*(1000 if maximum.group(2)=='k' else 1_000_000 if maximum.group(2)=='m' else 1)

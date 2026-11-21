@@ -241,13 +241,31 @@ def _begin_turn(state: dict, message: str) -> None:
     verified = domain.verify_explicit_preferences(state, message)
     if verified.get('error'):
         raise ValueError(verified['error'])
+    if state.get('_turn_intent')=='preference_update':
+        # After a verified durable revision, recalculate using the *complete*
+        # current profile before Hermes writes its commercial response.
+        # A zero-match result is a successful search, not a tooling error.
+        updated=domain.search_properties(state)
+        if updated.get('ok'):
+            state['_pref_updated_search_this_turn']={
+                'match_status':updated.get('match_status'),
+                'matching_properties':updated.get('matching_properties',[]),
+                'nearest_out_of_budget':updated.get('nearest_out_of_budget'),
+                'applied_criteria':updated.get('applied_criteria'),
+            }
+            state.setdefault('tool_observations',[]).append({
+                'tool':'search_after_preference_update','status':'applied',
+                'fields':['matching_properties'],
+                'message_id':state.get('_active_source_message_id'),
+                'timestamp':domain.now_local().isoformat()})
     # Read-only prefetch of the single, contextually resolved public house
     # record. This is NOT buyer interest, booking consent or media approval.
     # The full facts are fed to Hermes; its final answer is still validated.
     from app import commercial_turn
     ref=state.get('_turn_property_resolution') or {}
     intent=commercial_turn.core_query_topic(message)
-    if (ref.get('unit_id') and not ref.get('ambiguous') and
+    if (state.get('_turn_intent') not in ('property_search','preference_update') and
+            ref.get('unit_id') and not ref.get('ambiguous') and
             (intent or state.get('_pending_factual_topic_override')) in
             ('area','price','bedrooms','bathrooms','kitchen',
                        'backyard','parking','location','availability')):

@@ -28,20 +28,30 @@ def _validate_model_criteria(message: str, criteria: dict, base: dict) -> dict:
     if set(criteria)-valid:
         raise ValueError('Unsupported property search filter.')
     parsed=commercial_turn.extracted_criteria(message)
+    saved_bedrooms=base.get('bedrooms') or {}
+    saved_values={
+        v for v in (saved_bedrooms.get('preferred'),
+                    saved_bedrooms.get('minimum'),
+                    saved_bedrooms.get('maximum')) if isinstance(v,int)
+    }
     numeric_text=re.findall(r'\b\d+(?:[.,]\d+)?\b',message)
     def verified_number(value, *, allowed=()):
         return (str(value).replace('.0','') in numeric_text or
                 value in allowed)
     for key,value in criteria.items():
         if key=='bedrooms':
-            if not isinstance(value,int) or not 1<=value<=20 or value not in commercial_turn.counts(message):
-                raise ValueError('Bedroom filter is not grounded in the lead message.')
+            if (not isinstance(value,int) or not 1<=value<=20 or
+                    value not in commercial_turn.counts(message) and value not in saved_values):
+                raise ValueError('Bedroom filter is neither declared now nor saved in the lead profile.')
         elif key=='bedrooms_any':
             if (not isinstance(value,list) or not value or
-                any(not isinstance(x,int) or x not in commercial_turn.counts(message) for x in value)):
-                raise ValueError('Bedroom options are not grounded in the message.')
+                any(not isinstance(x,int) or
+                        x not in commercial_turn.counts(message) and x not in saved_values
+                        for x in value)):
+                raise ValueError('Bedroom options lack buyer evidence.')
         elif key in ('max_price_usd','min_price_usd'):
-            inherited=(base.get('budget') or {}).get('maximum_usd')
+            inherited=(base.get('budget') or {}).get(
+                'maximum_usd' if key=='max_price_usd' else 'minimum_usd')
             if not isinstance(value,int) or not 1<=value<100_000_000:
                 raise ValueError('Invalid price.')
             if value!=inherited and value!=parsed.get(key):
@@ -71,7 +81,10 @@ def derive(state: dict, message: str, criteria: dict | None=None,
     """Build one effective search without touching permanent preferences."""
     original=copy.deepcopy(state.get('search_preferences') or sales_preferences.empty())
     previous_filters=copy.deepcopy(state.get('property_filters') or property_filters.empty())
-    scope=commercial_turn.scope(message,has_main_preferences(state))
+    # Scope was decided BEFORE any automatic preference capture this turn.
+    # Recomputing it after capture mislabels the first search as temporary.
+    scope=state.get('_turn_scope') or commercial_turn.scope(
+        message,has_main_preferences(state))
     extracted=commercial_turn.extracted_criteria(message)
     supplied=_validate_model_criteria(message,criteria or {},original)
     combined={**extracted,**supplied}
