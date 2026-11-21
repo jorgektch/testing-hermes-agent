@@ -46,13 +46,13 @@ def select_and_book(lead, offer, state, start='13:00', *, confirm=True,
     domain.begin_turn(state, text)
     result = domain.select_visit_time(state, offer['proposal_id'], day, start)
     assert result['ok'], result
-    domain.end_turn(state, 'Can I confirm that hour?')
+    domain.end_turn(state, 'For H-201 on the chosen day and hour, reply Yes, I confirm. Confirm?')
     lead = db.save_turn(AUTH, lead['id'], lead['revision'], state, [],
-                        text, 'Can I confirm that hour?')
+                        text, 'For H-201 on the chosen day and hour, reply Yes, I confirm. Confirm?')
     assert not state['booked_visits']
     if not confirm:
         return lead, state, None
-    domain.begin_turn(state, 'Yes, please confirm the H-201 visit.')
+    domain.begin_turn(state, 'Yes, I confirm')
     pending = domain.book_visit(state, lead['first_name'], lead['last_name'],
                                 lead['email'], lead['phone'],
                                 date_str=day, start_time=start,
@@ -73,8 +73,11 @@ def test_no_unselected_unit_no_vague_date_no_precommit_name():
     assert 'error' in domain.update_lead(state, interest_unit_id='H-201')
     domain.begin_turn(state, 'I want to visit H-201.')
     assert domain.track_property_interest(state, 'H-201', 'interested')['ok']
-    assert 'error' in domain.slots(state, 'next week')
-    assert 'error' in domain.slots(state)
+    broad=domain.slots(state, 'next week')
+    assert broad.get('ok') and broad['available_dates']
+    assert broad['proposal_id'] is None
+    upcoming=domain.slots(state)
+    assert upcoming.get('ok') and upcoming['available_dates']
     offer = domain.slots(state, next_monday().isoformat())
     assert offer['ok'] and offer['unit_id'] == 'H-201'
     assert all(slot['start_time'].endswith(':00') for slot in offer['available_slots'])
@@ -96,7 +99,8 @@ def test_lead_must_choose_specific_hour_then_confirm_next_turn():
     assert domain.select_visit_time(state, offer['proposal_id'], slot['date'], slot['start_time'])['ok']
     assert 'error' in domain.book_visit(state, 'Test', 'Buyer', 'test@example.test', '+51999999999',
         date_str=slot['date'], start_time=slot['start_time'], proposal_id=offer['proposal_id'], unit_id='H-201')
-    domain.begin_turn(state, 'Yes, please confirm that hour')
+    domain.end_turn(state, 'For H-201 on that date and hour, reply Yes, I confirm. Confirm?')
+    domain.begin_turn(state, 'Yes, I confirm')
     assert 'error' in domain.book_visit(state, 'Test', 'Buyer', 'test@example.test', '+51999999999',
         date_str=slot['date'], start_time='09:30', proposal_id=offer['proposal_id'], unit_id='H-201')
     assert 'error' in domain.book_visit(state, 'Test', 'Buyer', 'test@example.test', '+51999999999',
@@ -113,7 +117,7 @@ def test_round_robin_3_and_no_fourth_double_booking(store):
         lead, offer, state = offer_one(lead, day)
         lead, state, pending = select_and_book(lead, offer, state)
         saved = db.save_turn(AUTH, lead['id'], lead['revision'], state, [],
-                             'Yes, please confirm the H-201 visit.', 'I have submitted your request.')
+                             'Yes, I confirm', 'I have submitted your request.')
         visit = saved['state']['booked_visits'][-1]
         assert visit['status'] == 'confirmed' and visit['unit_id'] == 'H-201'
         assert visit['advisor_name'] and visit['advisor_id']
@@ -133,7 +137,7 @@ def test_round_robin_3_and_no_fourth_double_booking(store):
     fourth, state, _ = select_and_book(fourth, offer, state)
     with pytest.raises(db.Conflict, match='no longer available|became unavailable'):
         db.save_turn(AUTH, fourth['id'], fourth['revision'], state, [],
-                     'Yes, please confirm the H-201 visit.', 'I have submitted your request.')
+                     'Yes, I confirm', 'I have submitted your request.')
     with db.database() as con:
         assert con.execute('SELECT COUNT(*) FROM meetings WHERE lead_id=?', (fourth['id'],)).fetchone()[0] == 0
 

@@ -196,6 +196,13 @@ def _begin_turn(state: dict, message: str) -> None:
     verified = domain.verify_explicit_preferences(state, message)
     if verified.get('error'):
         raise ValueError(verified['error'])
+    selected=domain.capture_explicit_visit_time(state,message)
+    if selected.get('captured'):
+        state.setdefault('tool_observations',[]).append({
+            'tool':'explicit_visit_time_validator','status':'applied',
+            'fields':['date','start_time','unit_id'],
+            'message_id':state.get('_active_source_message_id'),
+            'timestamp':domain.now_local().isoformat()})
 
 
 def restore_initial_greeting(history: list[dict], messages: list[dict]) -> list[dict]:
@@ -231,6 +238,36 @@ def _finish_turn(lead_id: str, rec: dict, state: dict, auth: dict,
         options['on_tool_state'] = on_tool_state
     history = restore_initial_greeting(rec['hermes_history'], rec.get('messages', []))
     result = chat(message, history, state, **options)
+    # Hermes drives conversation and tool selection. A single, explicitly
+    # accepted and already recap-presented booking is still a server-owned
+    # transaction: commit it even when the language model forgets the tool.
+    if domain.ready_to_finalize_visit(state):
+        draft=state['visit_draft']
+        proposal=state.get('booking_proposal') or {}
+        lead=state.get('lead') or {}
+        requested=dict(first_name=lead.get('first_name') or rec.get('first_name') or '',
+                       last_name=lead.get('last_name') or rec.get('last_name') or '',
+                       email=lead.get('email') or rec.get('email') or '',
+                       phone=lead.get('phone') or rec.get('phone') or '',
+                       unit_id=draft['unit_id'],proposal_id=proposal['proposal_id'],
+                       date_str=draft['date'],start_time=draft['start_time'],
+                       extra_occupied=occupied)
+        active=next((v for v in state.get('booked_visits',[]) if v.get('status')=='confirmed'),None)
+        if active:
+            if draft.get('action')=='reschedule' and draft.get('original_meeting_id')==active['meeting_id']:
+                outcome=domain.reschedule_visit(state,original_meeting_id=active['meeting_id'],**requested)
+            else:
+                outcome={'error':'An appointment is already confirmed. Request an explicit reschedule.'}
+        else:
+            outcome=domain.book_visit(state,**requested)
+        state.setdefault('tool_observations',[]).append({
+            'tool':'booking_commit_guard',
+            'status':'executed' if outcome.get('ok') else 'rejected',
+            'fields':['proposal_id','date_str','start_time','unit_id'],
+            'message_id':state.get('_active_source_message_id'),
+            'timestamp':domain.now_local().isoformat()})
+        if outcome.get('error'):
+            state['_booking_completion_error']=outcome['error']
     safe_reply = domain.redact_unconfirmed_advisor_names(result['reply'], state)
     from app.delivery_policy import validate_outbound
     safe_reply = validate_outbound(safe_reply, state)

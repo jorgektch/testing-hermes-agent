@@ -28,6 +28,36 @@ A **single-screen evaluation workspace** for [Nous Research Hermes Agent](https:
 - **Source of truth:** edit `shared/blackpenguin/{project,property_types,units,assets}.json`, run `python scripts/build_catalog_from_blackpenguin.py`, then `python scripts/generate_demo_assets.py` (requires `reportlab` installed). Do **not** manually edit generated `shared/catalog.json` or `backend/app/catalog.json`.
 - **Media:** `/properties/H-201/gallery` and equivalent URLs aggregate only the given unit's images. A PDF in a unit card is a synthetic *fact sheet*, not a licensed construction plan or project-level brochure. Retired apartment asset files are retained on disk only to avoid breaking previously shared historical links, but are not in the public catalog.
 
+## v11 — Dynamic Sales Preferences & Reliable Booking (review branch)
+
+- Buyer criteria are revisable: search_preferences stores a budget floor, cap,
+  approximate target, fixed funds and exact listing price separately, with
+  preferred/exact/min/max bedroom modes and a history of source messages.
+- A requested 2-bedroom property is a preference for two bedrooms, not silently
+  a 2-bedroom minimum. Three-bedroom houses are optional alternatives, and
+  unsolicited alternatives do not count as verified matches.
+- Hermes can discover approved photos and PDFs for the focused house without
+  sending links. Only the specifically requested asset may be sent, while other
+  approved resources can be suggested by name. Unit fact sheets are NOT plans.
+- Availability searches on different days no longer erase an hour selected by
+  the buyer. "Following day" refers to the last offered exact date.
+- Reservations require one unambiguous acceptance of a full house/date/hour
+  recap. Bare "Ok" is not consent. A server-side completion guard prevents
+  missing tool calls from forcing redundant confirmations.
+- The authoritative booking confirmation comes only from a successful atomic
+  database transaction. A failed reschedule must not remove the original.
+- The weekly calendar exposes every slot through expansion, and can follow a
+  date requested in chat. The right sidebar shows budget constraints and
+  actual saved vs provisional agent operations.
+- All people, inventory, location links, calendar events and visits are fictional.
+
+### v11 review checklist
+
+Run PYTHONPATH=backend python -m pytest -q backend/tests, regenerate the
+catalog and compare generated outputs, then cd frontend && npm ci && npm run build.
+Review CI and test the Preview with fictional leads before merging. Do not
+merge automatically or modify main before approval.
+
 ## v10 — focus continuity and graceful scheduling
 
 - `conversation_focus` tracks the unambiguously discussed house; `visit_draft` independently tracks the house, date and time of the requested visit. Browsing another listing does not redirect a pending appointment.

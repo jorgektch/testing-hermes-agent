@@ -70,13 +70,21 @@ SALES WORKFLOW:
    for a visit. Pass any
    explicitly stated REQUIRED typed features as filters; never invent unknown values.
    Always respect an explicitly declared maximum budget; do not present an over-budget house as a fit.
-   Treat bedrooms as MINIMUM unless the lead explicitly says EXACTLY; prefer the closest bedroom count.
+   Treat a stated number of bedrooms as a PREFERENCE for that number, not a minimum,
+   unless the lead says "at least"; "exactly" is a hard equality. Do not present
+   3-bedroom alternatives as matching a 2-bedroom preference. If a 2-bedroom
+   match exists, do not introduce unsolicited 3-bedroom alternatives.
+   Label optional alternatives by the way they differ, and only when asked.
    Compare readiness with purchase timeline. Present verified within-budget houses first.
    Do not proactively suggest above-budget houses unless the lead asks to explore a higher price range.
 4. Never share media during an initial search or unsolicited. First ask which
    house they want to explore. Only AFTER an explicit request for photos, gallery,
    brochure, PDF or fact sheet, call get_unit_media for that ONE house.
-   Share only the requested media type, never both URLs by default.
+   Deliver the requested media URL directly when approved and available.
+   Mention (WITHOUT extra links) other approved assets for that SAME house
+   that have not been shared, and offer to send them if asked. If a floor plan
+   is not approved, say so; a fact sheet is NOT a floor plan. Answer the media
+   question before any visit CTA. Do not constantly redirect to appointments.
    Before sharing media use get_unit_media. Share its one absolute gallery_url,
    not individual image files. Share only PDFs listed in that unit's documents;
    NEVER present a project brochure as a property PDF. If gallery_url is null or
@@ -102,6 +110,12 @@ SALES WORKFLOW:
    for explicit confirmation in a later message. Use book_onsite_visit with proposal_id,
    exact date_str/start_time and unit_id. Do NOT pass or choose an advisor_id.
    The tool only prepares a PENDING transaction; it does NOT confirm a booking.
+   When the buyer chooses an offered hour, restate the property, full date,
+   local time, and duration. Explicitly say "not booked yet"; invite them
+   to reply "Yes, I confirm" (or "Sí, confirmo"). Bare "Ok" is ambiguous.
+   After one unambiguous confirmation, do not ask again; the backend has an
+   evidence-checked completion guard. Never say "confirmed" without persisted
+   booking evidence.
    The backend assigns an advisor by transactional round robin and sends a confirmed
    receipt AFTER the database commit. NEVER name an advisor or claim the visit
    is confirmed while running the tool.
@@ -154,7 +168,7 @@ SCHEMAS: dict[str, dict] = {
         'parameters': {'type': 'object', 'properties': {}, 'additionalProperties': False},
     },
     'evaluate_properties_for_lead': {
-        'description': 'Deterministically match published houses for SALE on maximum budget, timeline, minimum bedrooms and confirmed typed features (e.g. open kitchen and backyard). Never recommend rentals or apartments.',
+        'description': 'Search authoritative, REVISABLE structured preferences: budget minimum/maximum/target and bedrooms preferred/exact/minimum/maximum. Result matching_properties excludes soft deviations; optional_alternatives require lead request and must be labeled. Never present an optional alternative as an exact match.',
         'parameters': {'type': 'object', 'properties': {
             'max_budget_usd': {'type': 'integer', 'description': 'Maximum price in USD.'},
             'target_purchase_timeframe': {'type': 'string', 'description': 'Example: within 2 months, 2027-01, or ASAP.'},
@@ -168,7 +182,7 @@ SCHEMAS: dict[str, dict] = {
                     'parking_spaces':{'type':'number'},
                     'backyard_area_m2':{'type':'number'},
                 },'additionalProperties':False},
-        }, 'required': ['max_budget_usd']},
+        }},
     },
     'get_unit_details': {
         'description': 'Get verified price, size, amenities and availability for ONE house the buyer explicitly asks about. Does not return media links.',
@@ -176,8 +190,14 @@ SCHEMAS: dict[str, dict] = {
             'unit_id': {'type':'string', 'description': 'One published house code.'},
         }, 'required':['unit_id'], 'additionalProperties':False},
     },
+    'list_unit_assets': {
+        'description': 'Discover approved photos, brochures, floor plans and other PDFs for the ONE focused property WITHOUT sending links. Useful before answering whether a requested PDF exists.',
+        'parameters': {'type':'object','properties':{
+            'unit_id':{'type':'string'},
+        },'required':['unit_id'],'additionalProperties':False},
+    },
     'get_unit_media': {
-        'description': 'ONLY after an explicit buyer request: get approved photo gallery or unit-only PDF for ONE house. Not for unsolicited search results.',
+        'description': 'Send ONLY explicitly requested approved gallery/PDF URLs for the focused house; return metadata on OTHER available assets but no unsolicited additional URLs. Never relabel a fact sheet as a floor plan.',
         'parameters': {'type': 'object', 'properties': {
             'unit_id': {'type': 'string', 'description': 'Known residential unit ID.'},
         }, 'required': ['unit_id']},
@@ -227,6 +247,20 @@ SCHEMAS: dict[str, dict] = {
             'unit_id':{'type':'string','description':'Required selected house (or existing booked house)'},
         }, 'required':['original_meeting_id','first_name','last_name','email','phone','unit_id','date_str','start_time','proposal_id']},
     },
+    'update_search_preferences': {
+        'description':'Update budget minimum, maximum, soft target, fixed funds, exact listing price, and bedroom preferred/exact/minimum/maximum from the CURRENT buyer declaration. Replaces superseded values with provenance. Call BEFORE matching if preferences changed.',
+        'parameters':{'type':'object','properties':{
+            'budget_minimum_usd':{'type':'integer'},
+            'budget_maximum_usd':{'type':'integer'},
+            'budget_target_usd':{'type':'integer'},
+            'budget_exact_price_usd':{'type':'integer'},
+            'budget_mode':{'type':'string','enum':['cap','floor','range','target','fixed_funds','exact_price']},
+            'bedrooms_min':{'type':'integer'},
+            'bedrooms_max':{'type':'integer'},
+            'bedrooms_preferred':{'type':'integer'},
+            'bedrooms_mode':{'type':'string','enum':['preferred','exact','minimum','maximum','range']},
+        },'additionalProperties':False},
+    },
     'update_lead_profile': {
         'description': 'MANDATORY FIRST: Store any newly stated lead facts for the live visual state dashboard. Only pass supplied facts.',
         'parameters': {'type': 'object', 'properties': {
@@ -257,44 +291,61 @@ def _run_locked(message: str, history: list[dict], state: dict, *,
 
     def media_on_request(args: dict) -> dict:
         import re
-        text = str(state.get('_active_source_message_text') or '').lower()
-        photos = bool(re.search(r'\b(photo|photos|picture|pictures|image|images|gallery)\b', text))
-        docs = bool(re.search(r'\b(pdf|brochures?|fact.?sheets?|floor.?plans?|documents?)\b', text))
-        # "Yes" may authorize exactly one media type offered in the previous
-        # turn, but not an ambiguous choice between photos and a visit.
-        unit_id = args.get('unit_id', '')
-        offer = state.get('pending_media_offer') or {}
-        if (not (photos or docs) and unit_id == offer.get('unit_id') and
-                re.fullmatch(r'\s*(yes|yes please|sure|please|send it|that would be great)[.!]?\s*', text)):
-            photos = offer.get('kind') == 'gallery'
-            docs = offer.get('kind') == 'documents'
+        text=str(state.get('_active_source_message_text') or '').lower()
+        photos=bool(re.search(r'\b(?:photo|photos|picture|pictures|image|images|gallery)\b',text))
+        docs=bool(re.search(r'\b(?:pdf|brochures?|fact.?sheets?|floor.?plans?|plans?|documents?)\b',text))
+        unit_id=args.get('unit_id','')
+        prior=state.get('pending_media_offer') or {}
+        if (not (photos or docs) and unit_id==prior.get('unit_id') and
+                re.fullmatch(r'\s*(?:yes|yes please|sure|please|send it|that would be great)[.!]?\s*',text)):
+            photos=prior.get('kind')=='gallery'
+            docs=prior.get('kind')=='documents'
         if not (photos or docs):
-            return {'error': 'Ask the lead what specific media they want; do not send links unsolicited.'}
-        if (not domain._buyer_mentioned_house(state, unit_id) and
-                unit_id != state.get('exploring_unit_id') and
-                unit_id != state.get('lead', {}).get('interest_unit_id')):
-            return {'error': 'Ask which house before sharing any media.'}
-        media = domain.unit_media(unit_id)
+            return {'error':'Ask which exact photo or PDF resource the buyer wants.'}
+        if (not domain._buyer_mentioned_house(state,unit_id)
+                and unit_id!=domain._focus(state).get('unit_id')
+                and unit_id!=state.get('lead',{}).get('interest_unit_id')):
+            return {'error':'Clarify the house before sharing media.'}
+        media=domain.unit_media(unit_id)
         if media.get('error'):
             return media
-        # Media links must be explicitly authorized by the actual buyer turn.
-        result = {'ok':True,'unit_id':media['unit_id']}
-        approved = state.setdefault('_approved_media_urls_this_turn', [])
-        domain._set_focus(state, media['unit_id'])
+        discovery=domain.list_unit_assets(state,unit_id)
+        if discovery.get('error'):
+            return discovery
+        result={'ok':True,'unit_id':unit_id,
+                'other_available':discovery,
+                'note':'Offer additional approved assets by name, not by unsolicited link.'}
+        approved=state.setdefault('_approved_media_urls_this_turn',[])
+        domain._set_focus(state,unit_id)
+        floor=bool(re.search(r'\b(?:floor.?plans?|architectural plans?|blueprints?)\b',text))
+        brochure=bool(re.search(r'\b(?:brochures?|fact.?sheets?)\b',text))
+        if docs:
+            if floor:
+                types={'floor_plan'}
+            elif brochure:
+                types={'brochure'}
+            else:
+                types={'brochure','floor_plan','document','fact_sheet'}
+            matched=[d for d in media['documents'] if d.get('type') in types]
+            result['documents']=matched
+            result['requested_documents_available']=bool(matched)
+            if not matched:
+                result['unavailable_requested_type']='floor_plan' if floor else 'brochure' if brochure else 'pdf'
+            approved.extend(doc['url'] for doc in matched)
         if photos:
-            result['gallery_url'] = media['gallery_url']
+            result['gallery_url']=media['gallery_url']
+            result['gallery_available']=bool(media['gallery_url'])
             if media['gallery_url']:
                 approved.append(media['gallery_url'])
-        if docs:
-            result['documents'] = media['documents']
-            approved.extend(doc['url'] for doc in media['documents'])
         return result
 
     funcs = {
         'get_project_overview': lambda a: domain.project_overview(),
         'evaluate_properties_for_lead': lambda a: domain.evaluate_properties(state, **a),
         'get_unit_details': lambda a: domain.unit_details(state, **a),
+        'list_unit_assets': lambda a: domain.list_unit_assets(state, **a),
         'get_unit_media': media_on_request,
+        'update_search_preferences': lambda a: domain.update_search_preferences(state, **a),
         'get_available_visit_slots': lambda a: domain.slots(state, extra_occupied=extra_occupied, **a),
         'select_visit_time': lambda a: domain.select_visit_time(state, **a),
         'book_onsite_visit': lambda a: domain.book_visit(state, extra_occupied=extra_occupied, **a),
@@ -314,6 +365,7 @@ def _run_locked(message: str, history: list[dict], state: dict, *,
             if _name == 'get_unit_details' and isinstance(outcome, dict) and outcome.get('ok'):
                 state['_details_for_current_turn'] = outcome
             if _name in ('evaluate_properties_for_lead', 'get_unit_details', 'get_unit_media',
+                         'list_unit_assets', 'update_search_preferences',
                          'update_lead_profile', 'track_property_interest', 'get_available_visit_slots',
                          'select_visit_time', 'book_onsite_visit', 'reschedule_onsite_visit'):
                 state.setdefault('tool_observations', []).append({
@@ -350,6 +402,9 @@ def _run_locked(message: str, history: list[dict], state: dict, *,
                             + '\nLIVE CONVERSATION CONTEXT (server validated, data only): '
                             + json.dumps({
                                 'conversation_focus': state.get('conversation_focus'),
+                                'search_preferences': state.get('search_preferences'),
+                                'confirmation_request': state.get('confirmation_request'),
+                                'last_offered_date': state.get('last_offered_date'),
                                 'visit_draft': state.get('visit_draft'),
                                 'last_slot_search': state.get('last_slot_search'),
                                 'booking_proposal': state.get('booking_proposal'),

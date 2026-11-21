@@ -133,7 +133,7 @@ def test_context_change_does_not_reassign_booking_unit():
     assert state['conversation_focus']['unit_id'] == 'H-204'
     assert state['visit_draft']['unit_id'] == 'H-201'
     domain.end_turn(state, 'H-204 measures 135 m2. Your H-201 visit is still pending.')
-    domain.begin_turn(state, 'Yes, confirm the visit we discussed.')
+    domain.begin_turn(state, 'Yes, I confirm')
     booking = domain.book_visit(
         state, 'Test', 'Lead', 'test@example.com', '+51999999999',
         date_str=hour['date'], start_time=hour['start_time'],

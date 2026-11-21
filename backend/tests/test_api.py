@@ -114,16 +114,16 @@ def test_round_robin_across_leads_and_deletion_releases(env):
         chosen_text = f'I choose {slot["start_time"]} for my H-201 visit'
         domain.begin_turn(state, chosen_text)
         assert domain.select_visit_time(state, offer['proposal_id'], slot['date'], slot['start_time'])['ok']
-        domain.end_turn(state, 'Please confirm this time.')
-        db.save_turn(auth,lead['id'],1,state,[],chosen_text,'Please confirm this time.')
-        domain.begin_turn(state, 'Yes, please confirm that hour.')
+        domain.end_turn(state, 'For H-201, this exact date and time is selected, not booked. Please reply Yes, I confirm. Confirm?')
+        db.save_turn(auth,lead['id'],1,state,[],chosen_text,'For H-201, this exact date and time is selected, not booked. Please reply Yes, I confirm. Confirm?')
+        domain.begin_turn(state, 'Yes, I confirm')
         booked = domain.book_visit(state, first_name,'Demo',lead['email'],lead['phone'],
                          date_str=slot['date'],start_time=slot['start_time'],
                          proposal_id=offer['proposal_id'],unit_id='H-201',
                          extra_occupied=db.occupied_by_advisor())
         assert booked['pending_commit']
         domain.end_turn(state,'Pending database confirmation')
-        lead = db.save_turn(auth,lead['id'],2,state,[],'Yes, please confirm that hour.','Pending database confirmation')
+        lead = db.save_turn(auth,lead['id'],2,state,[],'Yes, I confirm','Pending database confirmation')
         bookings.append((lead,lead['state']['booked_visits'][0],slot))
     assert bookings[0][1]['advisor_id'] != bookings[1][1]['advisor_id']
     assert bookings[0][1]['unit_id'] == bookings[1][1]['unit_id'] == 'H-201'
@@ -184,25 +184,25 @@ def test_booking_calendar_shared_between_admin_sessions(env):
     day = scheduling.local_now().date() + timedelta(days=1)
     while day.weekday() == 6:
         day += timedelta(days=1)
-    domain.begin_turn(state, 'I want H-101')
+    domain.begin_turn(state, 'I want to visit H-101')
     domain.track_property_interest(state, 'H-101', 'interested')
     offer = domain.slots(state, day.isoformat(), extra_occupied=db.occupied_by_advisor())
     assert offer['ok'], offer
     domain.end_turn(state, 'Here are some times')
-    db.save_turn(auth,lead['id'],0,state,[],'I want H-101','Here are some times')
+    db.save_turn(auth,lead['id'],0,state,[],'I want to visit H-101','Here are some times')
     slot = offer['available_slots'][0]
     chosen_text = f'I choose {slot["start_time"]} for H-101'
     domain.begin_turn(state, chosen_text)
     assert domain.select_visit_time(state, offer['proposal_id'], slot['date'], slot['start_time'])['ok']
-    domain.end_turn(state, 'Please confirm')
-    db.save_turn(auth,lead['id'],1,state,[],chosen_text,'Please confirm')
-    domain.begin_turn(state,'Yes, book that offered time, please')
+    domain.end_turn(state, 'For H-101, this date and hour is selected, not booked. Please reply Yes, I confirm. Confirm?')
+    db.save_turn(auth,lead['id'],1,state,[],chosen_text,'For H-101, this date and hour is selected, not booked. Please reply Yes, I confirm. Confirm?')
+    domain.begin_turn(state,'Yes, I confirm')
     booked = domain.book_visit(state,'Private','Demo',lead['email'],lead['phone'],
                                date_str=slot['date'],start_time=slot['start_time'],
                                proposal_id=offer['proposal_id'],unit_id='H-101')
     assert booked['ok']
     domain.end_turn(state,'Pending database confirmation')
-    result = db.save_turn(auth,lead['id'],2,state,[],'Yes, book that offered time, please','Pending database confirmation')
+    result = db.save_turn(auth,lead['id'],2,state,[],'Yes, I confirm','Pending database confirmation')
     booking = result['state']['booked_visits'][0]
     assert booking['advisor_name']
     params = {'start':slot['date'],'days':1}

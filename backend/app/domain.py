@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 from datetime import timezone
-from . import scheduling
+from . import scheduling, sales_preferences
 
 PROJECT_TZ = ZoneInfo('America/Lima')
 VISIT_MINUTES = 45
@@ -87,6 +87,12 @@ def blank_state() -> dict:
                                'source_message_id': None},
         'visit_draft': {'unit_id': None, 'date': None, 'start_time': None, 'status': 'idle'},
         'last_slot_search': None,
+        'last_offered_date': None,
+        'booking_offers': {},
+        'confirmation_request': None,
+        'shared_media': {},
+        'search_preferences': sales_preferences.empty(),
+        'search_preferences_history': [],
         'booked_visits': [],
         'booking_proposal': None,
         'property_interests': [],
@@ -97,6 +103,103 @@ def blank_state() -> dict:
         'bp_episode': bp,
     }
 
+
+
+
+def _preferences(state: dict) -> dict:
+    if 'search_preferences' not in state:
+        prefs=sales_preferences.empty()
+        lead=state.get('lead') or {}
+        if lead.get('budget_usd'):
+            prefs['budget'].update(mode='cap', maximum_usd=int(lead['budget_usd']))
+        if lead.get('min_bedrooms'):
+            prefs['bedrooms'].update(mode='minimum', minimum=int(lead['min_bedrooms']))
+        state['search_preferences']=prefs
+    return state['search_preferences']
+
+
+def update_search_preferences(state: dict, **kwargs) -> dict:
+    """Revise commercial preferences only when supported by the buyer's message."""
+    keys={'budget_minimum_usd':('budget','minimum_usd'),
+          'budget_maximum_usd':('budget','maximum_usd'),
+          'budget_target_usd':('budget','target_usd'),
+          'budget_exact_price_usd':('budget','exact_price_usd'),
+          'budget_mode':('budget','mode'),
+          'bedrooms_min':('bedrooms','minimum'),
+          'bedrooms_max':('bedrooms','maximum'),
+          'bedrooms_preferred':('bedrooms','preferred'),
+          'bedrooms_mode':('bedrooms','mode')}
+    if set(kwargs)-set(keys):
+        return {'error':'Unknown commercial preference.'}
+    message=str(state.get('_active_source_message_text') or '')
+    recognized=sales_preferences.parse_declarations(message)
+    requested={}
+    for name,value in kwargs.items():
+        group,field=keys[name]
+        requested.setdefault(group,{})[field]=value
+    if recognized:
+        for group,passed in list(requested.items()):
+            declared=recognized.get(group)
+            if declared:
+                for field,value in passed.items():
+                    if field in declared and value!=declared[field]:
+                        return {'error':'Preference disagrees with buyer statement.'}
+                requested[group]=declared
+    elif message and requested:
+        return {'error':'Ask the buyer to clarify the exact commercial preference.'}
+    result=sales_preferences.apply(state, requested,
+        source_message_id=state.get('_active_source_message_id'))
+    if not result.get('ok') or not result['changed_fields']:
+        return result
+    prefs=state['search_preferences']
+    facts={}
+    if 'budget' in result['changed_fields']:
+        b=prefs['budget']
+        if b['minimum_usd'] is not None:facts['budget_minimum']=b['minimum_usd']
+        if b['maximum_usd'] is not None:facts['budget_maximum']=b['maximum_usd']
+        facts['budget']=(f"USD {b['target_usd']} ({b['mode']})" if b['target_usd'] else
+            f"USD {b['exact_price_usd']} (exact listing price)" if b['exact_price_usd'] else
+            f"USD {b['minimum_usd'] or 'unset'} to {b['maximum_usd'] or 'unset'} ({b['mode']})")
+        ledger=state['bp_episode']['leads']['lead_profile_data']['sales_profile']
+        for key in ('budget_minimum','budget_maximum'):
+            if key not in facts and key in ledger['current']:
+                old=ledger['current'].pop(key)
+                old['status']='superseded'
+                ledger['history'].append(old)
+        state.setdefault('ui_fact_evidence',{})['budget_usd']={
+            'source_message_id':state.get('_active_source_message_id'),
+            'evidence':message,'captured_at':now_local().isoformat(),
+            'source':'active_conversation'}
+    if 'bedrooms' in result['changed_fields']:
+        b=prefs['bedrooms']
+        facts['bedrooms']=next(n for n in (b['preferred'],b['minimum'],b['maximum']) if n is not None)
+    _capture_bp_facts(state,facts)
+    state['stage']='Preferences updated'
+    record(state,'preferences_updated',
+           f"Revised {', '.join(result['changed_fields'])} (revision {prefs['revision']})")
+    return result
+
+
+def _selected_offer(state: dict) -> dict | None:
+    draft=_draft(state)
+    offer_id=draft.get('proposal_id')
+    if offer_id:
+        return ((state.get('booking_offers') or {}).get(offer_id) or
+                (state.get('booking_proposal') or {}))
+    p=state.get('booking_proposal') or {}
+    if p.get('selected_start_time')==draft.get('start_time') and p.get('selected_date')==draft.get('date'):
+        return p
+    return None
+
+
+def _resolve_visit_date(state: dict, raw: str) -> str:
+    if raw.strip().lower() in ('the following day','following day','next day',
+                                'the next day','day after'):
+        anchor=state.get('last_offered_date')
+        if not anchor:
+            raise ValueError('Which date do you mean by the following day?')
+        return (date.fromisoformat(anchor)+timedelta(days=1)).isoformat()
+    return date_input(raw)
 
 
 def _units_by_code() -> dict[str, dict]:
@@ -155,7 +258,8 @@ def _set_visit_unit(state: dict, code: str) -> None:
         return
     draft = _draft(state)
     if draft.get('unit_id') != code:
-        draft.update(unit_id=code, date=None, start_time=None, status='day_needed')
+        draft.update(unit_id=code, date=None, start_time=None,proposal_id=None,status='day_needed')
+        state['confirmation_request']=None
         proposal = state.get('booking_proposal')
         if proposal and proposal.get('selected_unit_id') != code and proposal.get('status') == 'offered':
             state['booking_proposal'] = None
@@ -177,7 +281,7 @@ def _observe_inbound_context(state: dict, message: str) -> None:
         focus['ambiguous'] = True
         state['bp_episode']['sales_dialogue_states']['state_json']['conversation_focus'] = copy.deepcopy(focus)
     visit_intent = bool(re.search(
-        r'\b(?:visit|tour|book|schedule|appointment|slots|visit times|which hours|what times|see in person|view in person)\b',
+        r'\b(?:visit|tour|book|schedule|appointment|slots|visit times|which hours|what times|see in person|view in person|see\s+H-\d{3}|view\s+H-\d{3})\b',
         message, flags=re.I))
     negated = bool(re.search(r"\b(?:don['’]?t|do not|not|cancel|without)\s+"
                              r"(?:want to )?(?:visit|tour|book|schedule)\b", message, flags=re.I))
@@ -194,6 +298,13 @@ def _observe_inbound_context(state: dict, message: str) -> None:
         message, flags=re.I))
     if existing_visit_reference and not mentioned and _draft(state).get('unit_id'):
         return
+    active=next((b for b in state.get('booked_visits',[]) if b.get('status')=='confirmed'),None)
+    if active and re.search(
+        r'\b(?:reschedule|change|move|postpone|switch)\b.*'
+        r'\b(?:visit|appointment|date|day|time)\b',message,re.I):
+        draft=_draft(state)
+        draft['action']='reschedule'
+        draft['original_meeting_id']=active['meeting_id']
     if visit_intent and not negated:
         target = mentioned[0] if len(mentioned) == 1 else (
             focus.get('unit_id') if not mentioned and not focus.get('ambiguous') else None)
@@ -290,6 +401,8 @@ def end_turn(state: dict, reply: str) -> None:
     state.pop('_matching_options_this_turn', None)
     state.pop('_details_for_current_turn', None)
     state.pop('_slot_queries_this_turn', None)
+    state.pop('_booking_completion_error', None)
+    state.pop('_allowed_alternative_units_this_turn', None)
     mentioned = list(dict.fromkeys(code.upper() for code in re.findall(
         r'(?<![A-Z0-9])H-\d{3}(?![A-Z0-9])', reply.upper())))
     candidate = (mentioned[0] if len(mentioned) == 1 else
@@ -298,6 +411,16 @@ def end_turn(state: dict, reply: str) -> None:
     mixed = bool(re.search(r'\b(?:photos?|gallery|images?|pdf|brochure|or choose|or see)\b', reply, re.I))
     state['pending_visit_offer'] = (
         {'unit_id': candidate} if candidate and '?' in reply and invitation and not mixed else None)
+    draft=_draft(state)
+    if (draft.get('status')=='awaiting_confirmation' and
+            re.search(r'\b(?:confirm|accept|reserve|book\s+it)\b',reply,re.I) and
+            ('?' in reply or re.search(r'\b(?:reply|please confirm|can you confirm)\b',reply,re.I))):
+        state['confirmation_request']={
+            'unit_id':draft['unit_id'],'date':draft['date'],
+            'start_time':draft['start_time'],
+            'proposal_id':draft.get('proposal_id'),
+            'prompt_message_id':bp['sales_messages'][-1]['id'],
+        }
 
 
 def _capture_bp_facts(state: dict, changed: dict) -> None:
@@ -443,101 +566,134 @@ def project_overview() -> dict:
     return {'ok': True, 'project_info': read_catalog()['project_info']}
 
 
-def evaluate_properties(state: dict, max_budget_usd: int,
+def evaluate_properties(state: dict, max_budget_usd: int | None = None,
                         target_purchase_timeframe: str | None = None,
                         min_bedrooms: int | None = None,
                         preferred_property_type: str | None = None,
                         required_features: dict | None = None) -> dict:
+    """Rank literal buyer matches. Never silently relax a declared constraint."""
+    lead = state.get('lead', {})
+    prefs = copy.deepcopy(_preferences(state))
     try:
-        budget = int(max_budget_usd)
-        lead = state.get('lead', {})
-        # A tool call may not silently relax an already declared hard cap.
-        # This safeguards matching even if Hermes passes an incorrect value.
-        declared_budget = lead.get('budget_usd')
-        if declared_budget is not None:
-            budget = min(budget, int(declared_budget))
-        beds = int(min_bedrooms) if min_bedrooms is not None else None
-        declared_beds = lead.get('min_bedrooms')
-        if declared_beds is not None:
-            beds = max(beds or 0, int(declared_beds))
-        if budget <= 0 or (beds is not None and (beds < 1 or beds > 20)):
+        fallback_max = int(max_budget_usd) if max_budget_usd is not None else None
+        if fallback_max is not None and fallback_max <= 0:
             raise ValueError
-    except (TypeError, ValueError):
-        return {'error': 'Provide a positive integer budget and valid minimum bedrooms.'}
-    allowed_types={'house':'House','apartment':'Apartment','either':None}
-    chosen=preferred_property_type or state.get('lead',{}).get('property_type') or 'Either'
-    chosen_type=allowed_types.get(str(chosen).strip().lower(),'invalid')
-    if chosen_type=='invalid':return {'error':'Preferred property type must be Apartment, House or Either.'}
-    filter_features=required_features or {}
-    if not isinstance(filter_features,dict):return {'error':'required_features must be a JSON object.'}
-    allowed_features={'kitchen_layout','private_backyard','backyard_area_m2',
-                      'private_terrace','parking_spaces'}
-    if set(filter_features)-allowed_features:
-        return {'error':'Unsupported feature filters. Use only confirmed, typed features.'}
+        fallback_beds = int(min_bedrooms) if min_bedrooms is not None else None
+        if fallback_beds is not None and not 1 <= fallback_beds <= 20:
+            raise ValueError
+    except (ValueError, TypeError):
+        return {'error': 'Invalid maximum budget or bedroom criteria.'}
+    # Explicit current state wins over stale model arguments, including a
+    # newly increased maximum. A soft target is not a hard spending limit.
+    if prefs['budget']['mode'] == 'unknown':
+        cap = lead.get('budget_usd') or fallback_max
+        if cap is not None:
+            prefs['budget'].update(mode='cap', maximum_usd=int(cap))
+    if prefs['bedrooms']['mode'] == 'unknown':
+        beds = lead.get('min_bedrooms') or fallback_beds
+        if beds is not None:
+            prefs['bedrooms'].update(mode='minimum', minimum=int(beds))
+    allowed_types = {'house':'House','apartment':'Apartment','either':None}
+    chosen = preferred_property_type or lead.get('property_type') or 'Either'
+    chosen_type = allowed_types.get(str(chosen).strip().lower(), 'invalid')
+    if chosen_type == 'invalid':
+        return {'error':'Preferred property type must be House, Apartment or Either.'}
+    features = required_features or {}
+    if not isinstance(features, dict):
+        return {'error':'Required features must be a JSON object.'}
+    allowed_features = {'kitchen_layout','private_backyard','backyard_area_m2',
+                        'private_terrace','parking_spaces'}
+    if set(features)-allowed_features:
+        return {'error':'Unsupported confirmed-feature filter.'}
     try:
-        for key,value in filter_features.items():
+        for key,value in features.items():
             if key in ('parking_spaces','backyard_area_m2'):
                 float(value)
             elif key in ('private_backyard','private_terrace') and not isinstance(value,bool):
-                raise ValueError('Boolean feature value required')
+                raise ValueError
             elif key=='kitchen_layout' and value not in ('open','closed','semi_open'):
-                raise ValueError('Invalid kitchen layout')
-    except (ValueError,TypeError):
-        return {'error':'Invalid value for typed feature filter.'}
-    deadline, interpretation = parse_target_date(target_purchase_timeframe)
-    matches, out_budget, other = [], [], []
-    for raw_unit in read_catalog()['properties']:
-        unit = copy.deepcopy(raw_unit)
-        unit['ready_by_purchase_deadline'] = None if deadline is None else ready_date(unit) <= deadline
-        if unit['price_usd'] > budget:
-            unit['exceeds_budget_by_usd'] = unit['price_usd'] - budget
-            out_budget.append(unit)
-        elif chosen_type and unit['property_type']!=chosen_type:
-            unit['mismatch_reason']='Different property category from the lead preference'
-            other.append(unit)
-        elif beds and unit['bedrooms'] < beds:
-            unit['mismatch_reason'] = 'Fewer bedrooms than requested'
-            other.append(unit)
-        elif any(
+                raise ValueError
+    except (ValueError, TypeError):
+        return {'error':'Invalid confirmed-feature filter value.'}
+    deadline, interpretation = parse_target_date(
+        target_purchase_timeframe or lead.get('purchase_timeframe'))
+    primary, alternatives, out_budget, other = [], [], [], []
+    for raw in read_catalog()['properties']:
+        unit=copy.deepcopy(raw)
+        unit['ready_by_purchase_deadline']=None if deadline is None else ready_date(unit)<=deadline
+        eligible, violations, deviations=sales_preferences.filter_unit(unit,prefs)
+        if chosen_type and unit['property_type']!=chosen_type:
+            violations.append('Different property category')
+        if any(
             key not in unit.get('confirmed_features',{}) or
             (float(unit['confirmed_features'][key])!=float(want) if key in ('parking_spaces','backyard_area_m2')
              else unit['confirmed_features'][key]!=want)
-            for key,want in filter_features.items()
+            for key,want in features.items()
         ):
-            unit['mismatch_reason']='Does not meet all confirmed required features'
-            other.append(unit)
-        elif deadline is not None and ready_date(unit) > deadline:
-            unit['mismatch_reason'] = 'Not ready by the target purchase date'
-            other.append(unit)
+            violations.append('Missing a required verified feature')
+        if deadline is not None and ready_date(unit)>deadline:
+            violations.append('Not ready by the stated purchase deadline')
+        if violations:
+            unit['mismatch_reason']='; '.join(violations)
+            if 'Exceeds the declared maximum budget' in violations:
+                cap=prefs['budget']['maximum_usd']
+                if cap is not None:unit['exceeds_budget_by_usd']=unit['price_usd']-cap
+                out_budget.append(unit)
+            else:
+                other.append(unit)
+        elif deviations:
+            unit['mismatch_reason']='; '.join(deviations)
+            unit['alternative_only']=True
+            alternatives.append(unit)
         else:
-            matches.append(unit)
-    # Prefer the home closest to the requested bedroom count; 2-bed before
-    # 3-bed when the lead asks for at least two, while retaining valid extras.
-    matches.sort(key=lambda unit: ((unit['bedrooms']-beds) if beds else 0,
-                                   unit['price_usd'], unit['unit_id']))
-    out_budget.sort(key=lambda unit: (unit['exceeds_budget_by_usd'], unit['unit_id']))
-    state['shortlisted_unit_ids'] = [u['unit_id'] for u in matches]
-    state['stage'] = 'Properties matched' if matches else 'Exploring alternatives'
-    record(state, 'matching', f'{len(matches)} matching properties · ${budget:,} budget')
-    # Search tool returns an SMS-sized decision overview, never full cards,
-    # brochures, gallery links or amenities. A separate tool loads one house.
-    def compact(unit: dict) -> dict:
-        fields = ('unit_id', 'commercial_name', 'property_type', 'bedrooms',
-                  'price_usd', 'available_from_date', 'status',
-                  'ready_by_purchase_deadline', 'exceeds_budget_by_usd', 'mismatch_reason')
-        return {key: unit[key] for key in fields if key in unit}
+            primary.append(unit)
+    target_beds=(prefs['bedrooms'].get('preferred') or prefs['bedrooms'].get('minimum') or 0)
+    target_price=prefs['budget'].get('target_usd') or 0
+    def order(u):
+        return (abs(u['bedrooms']-target_beds) if target_beds else 0,
+                abs(u['price_usd']-target_price) if target_price else u['price_usd'],
+                u['unit_id'])
+    primary.sort(key=order)
+    alternatives.sort(key=order)
+    out_budget.sort(key=lambda u:(u.get('exceeds_budget_by_usd',0),u['unit_id']))
+    state['shortlisted_unit_ids']=[u['unit_id'] for u in primary]
+    state['stage']='Properties matched' if primary else 'Exploring alternatives'
+    record(state,'matching',f"{len(primary)} exact matches; {len(alternatives)} optional alternatives")
+    def compact(u):
+        fields=('unit_id','commercial_name','property_type','bedrooms',
+                'price_usd','available_from_date','status',
+                'ready_by_purchase_deadline','exceeds_budget_by_usd',
+                'mismatch_reason','alternative_only')
+        return {k:u[k] for k in fields if k in u}
+    spoken=str(state.get('_active_source_message_text') or '')
+    alternatives_requested=bool(re.search(
+        r'\b(?:alternative|alternatives|other options|other houses|anything else|'
+        r'what else|more options|more bedrooms|flexible|similar houses)\b',
+        spoken, flags=re.I))
+    # Unless explicitly requested, deviations are not sold as matches.
+    optional=[compact(u) for u in alternatives[:3]] if alternatives_requested else []
+    state['_allowed_alternative_units_this_turn']={
+        u['unit_id'] for u in optional}
     return {
-        'ok': True,
-        'applied_criteria': {'max_budget_usd': budget, 'min_bedrooms': beds,
-                             'preferred_property_type': chosen_type or 'Either',
-                             'transaction_type': 'sale'},
-        'matching_properties': [compact(u) for u in matches],
-        'out_of_budget_properties': [compact(u) for u in out_budget],
-        'other_nonmatching_properties': [compact(u) for u in other],
-        'next_action': 'Offer a brief list of matching houses and ask which ONE to explore; no unsolicited media.',
-        'interpreted_purchase_deadline': deadline.isoformat() if deadline else None,
-        'timeframe_interpretation': interpretation,
-        'note': 'Only fictional houses for sale are listed. The maximum declared budget is a hard cap; over-budget homes are NOT matches and must not be proactively recommended. Financing details are discussed only at the onsite visit.'
+        'ok':True,
+        'applied_criteria':{
+            'budget':prefs['budget'],'bedrooms':prefs['bedrooms'],
+            'preferred_property_type':chosen_type or 'Either',
+            'transaction_type':'sale',
+        },
+        'matching_properties':[compact(u) for u in primary],
+        'optional_alternatives':optional,
+        'out_of_budget_properties':[compact(u) for u in out_budget],
+        'other_nonmatching_properties':[compact(u) for u in other],
+        'interpreted_purchase_deadline':deadline.isoformat() if deadline else None,
+        'timeframe_interpretation':interpretation,
+        'next_action':('Present only actual matching houses; identify any buyer-requested '
+                       'alternative as OPTIONAL and explain the specific difference. '
+                       'Do not bring up an alternative without a request; '
+                       'do not push booking before answering the buyer.'),
+        'note':'Buyer budget ceilings and exact bedroom constraints are authoritative. '
+               'Soft bedroom differences are labeled alternatives, NEVER matches. '
+               'Inventory, prices and advisors are fictional.'
     }
 
 
@@ -611,6 +767,32 @@ def unit_media(unit_id: str) -> dict:
     }
 
 
+
+def list_unit_assets(state: dict, unit_id: str) -> dict:
+    """Read approved media availability without authorizing any URLs to send."""
+    unit = _units_by_code().get(unit_id)
+    if not unit:
+        return {'error':'Unknown or unpublished house.'}
+    if state.get('_active_source_message_id') and (
+        unit_id!=_focus(state).get('unit_id') and not _buyer_mentioned_house(state,unit_id)):
+        return {'error':'Ask which property the buyer is referring to.'}
+    media=unit_media(unit_id)
+    if media.get('error'):
+        return media
+    previous=(state.get('shared_media') or {}).get(unit_id) or {}
+    sent=set(previous.get('document_urls_sent') or [])
+    return {'ok':True,'unit_id':unit_id,
+            'gallery':{'available':media['gallery_available'],
+                       'image_count':media['image_count'],
+                       'already_shared':bool(previous.get('gallery_sent'))},
+            'documents':[{'type':x['type'],'title':x['title'],
+                          'already_shared':x['url'] in sent}
+                         for x in media['documents']],
+            'note':'Discovery returns NO URLs. Only deliver requested, approved assets; '
+                   'a property fact sheet is not an architectural floor plan.'}
+
+
+
 def date_input(raw: str | None) -> str | None:
     if not raw:
         return None
@@ -680,7 +862,7 @@ def slots(state: dict, date_str: str | None = None, *,
     exact_date = None
     if date_str and not relative:
         try:
-            exact_date = date.fromisoformat(date_input(date_str))
+            exact_date = date.fromisoformat(_resolve_visit_date(state, date_str))
         except (ValueError, TypeError):
             return _slot_error('INVALID_DATE',
                 'Please give a date, for example November 27, or say next week.',
@@ -744,9 +926,8 @@ def slots(state: dict, date_str: str | None = None, *,
         queries[key] = copy.deepcopy(result)
         return result
     if not options:
-        state['booking_proposal'] = None
-        dialogue = state['bp_episode']['sales_dialogue_states']['state_json']
-        dialogue['booking_proposal'] = None
+        # A failed exploratory search must not delete a previously selected hour.
+        # The buyer may switch back to the last valid proposal while it lives.
         same_day = scheduling.public_start_times([
             item for item in all_slots if item['date'] == exact_date.isoformat()])
         result = _slot_error('NO_SLOTS',
@@ -759,6 +940,17 @@ def slots(state: dict, date_str: str | None = None, *,
                                     'time_preference': time_preference, 'result_code': 'NO_SLOTS'}
         queries[key] = copy.deepcopy(result)
         return result
+    state['last_offered_date'] = exact_date.isoformat()
+    # Look up previously offered choices without assuming the most recent
+    # query is the buyer's selected appointment.
+    candidates=list((state.get('booking_offers') or {}).values())
+    if previous and previous.get('proposal_id') not in {p.get('proposal_id') for p in candidates}:
+        candidates.append(previous)
+    previous=next((p for p in reversed(candidates) if
+        p.get('selected_unit_id')==unit_id and
+        p.get('date')==exact_date.isoformat() and
+        p.get('time_preference')==time_preference and
+        p.get('status')=='offered'), {})
     if (previous.get('status') == 'offered' and previous.get('selected_unit_id') == unit_id
             and previous.get('date') == exact_date.isoformat()
             and previous.get('time_preference') == time_preference):
@@ -771,6 +963,9 @@ def slots(state: dict, date_str: str | None = None, *,
                           'proposal_id': previous['proposal_id'],
                           'expires_at': previous['expires_at'], 'timezone': pol['timezone'],
                           'notice': 'Existing proposal; slots are not reserved.'}
+                state['last_slot_search']={'unit_id':unit_id,'requested':date_str,
+                    'date':exact_date.isoformat(),'time_preference':time_preference,
+                    'result_code':'OK'}
                 queries[key] = copy.deepcopy(result)
                 return result
         except (KeyError, ValueError, TypeError):
@@ -784,16 +979,29 @@ def slots(state: dict, date_str: str | None = None, *,
                 'time_preference': time_preference, 'options': options,
                 'offer_source_message_id': state.get('_active_source_message_id'),
                 'expires_at': expires_at, 'timezone': pol['timezone']}
-    state['booking_proposal'] = proposal
-    draft.update(unit_id=unit_id, date=exact_date.isoformat(), status='hour_needed')
+    offers=state.setdefault('booking_offers',{})
+    offers[proposal_id]=proposal
+    # Bound memory growth. No booked appointment is ever deleted by this cache.
+    if len(offers)>20:
+        for old_id in list(offers)[:-20]:
+            if old_id!=draft.get('proposal_id'):
+                offers.pop(old_id,None)
+    selected=(draft.get('status')=='awaiting_confirmation' and
+              draft.get('unit_id')==unit_id and draft.get('proposal_id') and
+              draft.get('start_time'))
+    if not selected:
+        state['booking_proposal']=proposal
+        draft.update(unit_id=unit_id,date=exact_date.isoformat(),
+                     start_time=None,proposal_id=None,status='hour_needed')
     dialogue = state['bp_episode']['sales_dialogue_states']['state_json']
     dialogue['booking_search'] = {'requested_date': exact_date.isoformat(),
                                   'timezone': pol['timezone'],
                                   'unit_id': unit_id, 'time_preference': time_preference}
-    dialogue['booking_proposal'] = copy.deepcopy(proposal)
+    dialogue['booking_proposal'] = copy.deepcopy(state.get('booking_proposal'))
     dialogue['visit_draft'] = copy.deepcopy(draft)
     state['bp_episode']['sales_dialogue_states']['revision'] += 1
     state['last_slot_search'] = {'unit_id': unit_id, 'requested': date_str,
+                                'date':exact_date.isoformat(),
                                 'time_preference': time_preference, 'result_code': 'OK'}
     record(state, 'slot_offer',
            f'{len(options)} hourly start times offered for {unit_id} on {exact_date.isoformat()}')
@@ -835,7 +1043,7 @@ def select_visit_time(state: dict, proposal_id: str, date_str: str, start_time: 
     A model cannot silently pick among offered hours. The lead's current
     message must contain the clock time, and booking requires later consent.
     """
-    proposal = state.get('booking_proposal')
+    proposal=(state.get('booking_offers') or {}).get(proposal_id) or state.get('booking_proposal')
     if not proposal or proposal.get('status') != 'offered' or proposal.get('proposal_id') != proposal_id:
         return {'error': 'No matching active offer. Search availability again.'}
     try:
@@ -845,10 +1053,21 @@ def select_visit_time(state: dict, proposal_id: str, date_str: str, start_time: 
             return {'error': 'The offer expired. Search for new availability.'}
     except (ValueError, TypeError):
         return {'error': 'Invalid visit date or time.'}
+    if proposal.get('selected_unit_id')!=_draft(state).get('unit_id'):
+        return {'error':'This offer belongs to a different property from the current visit draft.'}
     if not any(slot['date'] == parsed_day and slot['start_time'] == parsed_time
                for slot in proposal['options']):
         return {'error': 'This hour was not offered.'}
     spoken = str(state.get('_active_source_message_text') or '').lower()
+    # An hour without an explicit date refers to the LAST exact date offered
+    # to the lead, not an older or merely searched proposal.
+    has_date = (parsed_day in spoken or
+        bool(re.search(r'\b(?:' + str(int(parsed_day[-2:])) +
+            r')(?:st|nd|rd|th)?\s+(?:nov|dec|jan|feb|mar|apr|may|jun|jul|aug|sep|oct)',spoken)) or
+        bool(re.search(r'\b(?:nov|dec|jan|feb|mar|apr|may|jun|jul|aug|sep|oct)\w*\s+' +
+            str(int(parsed_day[-2:])) + r'(?:st|nd|rd|th)?\b',spoken)))
+    if not has_date and state.get('last_offered_date') not in (None,parsed_day):
+        return {'error':'Selected hour must belong to the most recently offered date.'}
     hour = int(parsed_time[:2]); twelve = hour % 12 or 12
     meridian = 'am' if hour < 12 else 'pm'
     possible = (rf'\b0?{hour}:00\b',
@@ -857,9 +1076,13 @@ def select_visit_time(state: dict, proposal_id: str, date_str: str, start_time: 
         return {'error': 'Ask the lead to explicitly choose a clock time, such as 9 AM.'}
     proposal.update(selected_start_time=parsed_time, selected_date=parsed_day,
                     selected_source_message_id=state.get('_active_source_message_id'))
-    draft = _draft(state)
+    state.setdefault('booking_offers',{})[proposal_id]=proposal
+    state['booking_proposal']=proposal
+    draft=_draft(state)
     draft.update(unit_id=proposal['selected_unit_id'], date=parsed_day,
-                 start_time=parsed_time, status='awaiting_confirmation')
+                 start_time=parsed_time,proposal_id=proposal_id,status='awaiting_confirmation')
+    state['confirmation_request']=None
+    state['bp_episode']['sales_dialogue_states']['state_json']['booking_proposal'] = copy.deepcopy(proposal)
     state['bp_episode']['sales_dialogue_states']['state_json']['visit_draft'] = copy.deepcopy(draft)
     record(state, 'hour_selected', f'Lead chose {parsed_day} {parsed_time} for {proposal["selected_unit_id"]}')
     return {'ok': True, 'date': parsed_day, 'start_time': parsed_time,
@@ -978,6 +1201,19 @@ def update_lead(state: dict, **kwargs: Any) -> dict:
     if isinstance(interest,str) and interest in {u['unit_id'] for u in read_catalog()['properties']}:
         if 'interest_unit_id' not in changed and lead.get('interest_unit_id')!=interest:
             changed['interest_unit_id']=interest
+    # A model replay of a parsed buyer declaration must not reintroduce a
+    # stale spending ceiling or turn an exact/preferred bedroom count into MIN.
+    structured=_preferences(state)
+    if structured.get('last_source_message_id')==state.get('_active_source_message_id'):
+        declared=sales_preferences.parse_declarations(state.get('_active_source_message_text') or '')
+        if 'budget' in declared:
+            for field in ('budget_usd',):
+                changed.pop(field,None)
+            for field in ('budget_minimum','budget_maximum','budget'):
+                bp_changed.pop(field,None)
+        if 'bedrooms' in declared:
+            changed.pop('min_bedrooms',None)
+            bp_changed.pop('bedrooms',None)
     if changed or bp_changed:
         lead.update(changed)
         # UI-only fields (e.g. House vs Apartment) are not part of BP's 16
@@ -1001,6 +1237,24 @@ def update_lead(state: dict, **kwargs: Any) -> dict:
                     del merged[alias]
             merged[field]=value
         _capture_bp_facts(state, merged)
+        # Normalize legacy Hermes profile writes that were not already parsed
+        # from a direct declaration; otherwise only the UI mirror would change.
+        current_source=state.get('_active_source_message_id')
+        if _preferences(state).get('last_source_message_id')!=current_source:
+            budgets={}
+            if 'budget_maximum' in bp_changed:
+                budgets={'mode':'cap','maximum_usd':bp_changed['budget_maximum']}
+            elif 'budget_usd' in changed:
+                budgets={'mode':'cap','maximum_usd':changed['budget_usd']}
+            if 'budget_minimum' in bp_changed:
+                budgets['minimum_usd']=bp_changed['budget_minimum']
+                budgets['mode']='range' if 'maximum_usd' in budgets else 'floor'
+            beds={}
+            if 'min_bedrooms' in changed or 'bedrooms' in bp_changed:
+                beds={'mode':'minimum','minimum':bp_changed.get('bedrooms',changed.get('min_bedrooms'))}
+            if budgets or beds:
+                sales_preferences.apply(state,
+                    {'budget':budgets,'bedrooms':beds}, source_message_id=current_source)
         if changed.get('interest_unit_id'):
             _set_focus(state, changed['interest_unit_id'])
         if lead.get('budget_usd') and lead.get('purchase_timeframe'):
@@ -1052,25 +1306,106 @@ def verify_explicit_preferences(state: dict, message: str) -> dict:
     """
     values = explicitly_declared_preferences(message)
     missing = {key: val for key, val in values.items() if state['lead'].get(key) != val}
-    if not missing:
-        return {'ok': True, 'changed_fields': {}}
-    response = update_lead(state, **missing)
-    if response.get('ok'):
+    if missing:
+        response = update_lead(state, **missing)
+        if response.get('error'):
+            return response
         state.setdefault('tool_observations', []).append({
-            'tool': 'explicit_preference_validator', 'status': 'applied',
-            'fields': list(missing), 'message_id': state.get('_active_source_message_id'),
-            'timestamp': datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00','Z'),
+            'tool':'explicit_preference_validator','status':'applied',
+            'fields':list(missing),'message_id':state.get('_active_source_message_id'),
+            'timestamp':now_local().isoformat(),
         })
-        state['tool_observations'] = state['tool_observations'][-50:]
+    else:
+        response={'ok':True,'changed_fields':{}}
+    explicit=sales_preferences.parse_declarations(message)
+    if explicit:
+        typed={}
+        for name,values in explicit.items():
+            for k,v in values.items():
+                alias={'minimum_usd':'budget_minimum_usd','maximum_usd':'budget_maximum_usd',
+                       'target_usd':'budget_target_usd','exact_price_usd':'budget_exact_price_usd',
+                       'mode':f'{name}_mode','minimum':'bedrooms_min','maximum':'bedrooms_max',
+                       'preferred':'bedrooms_preferred'}.get(k)
+                if alias:typed[alias]=v
+        result=update_search_preferences(state,**typed)
+        if result.get('error'):return result
+        if result.get('changed_fields'):
+            state.setdefault('tool_observations',[]).append({
+                'tool':'explicit_preference_validator','status':'applied',
+                'fields':result['changed_fields'],
+                'message_id':state.get('_active_source_message_id'),
+                'timestamp':now_local().isoformat()})
+    state['tool_observations']=state.get('tool_observations',[])[-50:]
     return response
 
 
 def _explicit_lead_confirmation(state: dict) -> bool:
-    """Demo-only confirmation gate; never rely on LLM-provided consent flags."""
+    """Accept a clearly affirmative answer to the exact outstanding recap.
+
+    Bare "OK", "sounds good" or a statement about other topics is NOT booking
+    consent. The buyer must have seen the complete property/date/time recap.
+    """
     text=str(state.get('_active_source_message_text') or '').strip().lower()
-    if not text or re.search(r'\b(?:not|don.t|never|cancel|no|without)\s+(?:want|confirm|book|schedule|reserve)\b',text):
+    if not text or re.search(r'\b(?:not|don.t|never|cancel|no|without)\b',text):
         return False
-    return bool(re.search(r'\b(?:yes|confirm|book|reserve|schedule|go ahead|sounds good|works for me|please do|that works|perfect)\b',text))
+    request=state.get('confirmation_request') or {}
+    draft=_draft(state)
+    if not request or any(request.get(k)!=draft.get(k) for k in ('unit_id','date','start_time')):
+        return False
+    if request.get('prompt_message_id') == state.get('_active_source_message_id'):
+        return False
+    return bool(re.fullmatch(
+        r'\s*(?:yes[\s,!.]*(?:i\s+)?(?:confirm|accept|book\s+it|please\s+book\s+it)|'
+        r'i\s+confirm|i\s+accept|confirm(?:\s+the\s+visit)?|'
+        r'please\s+(?:book|confirm|reserve)\s+(?:it|the\s+visit)|'
+        r'si[\s,!.]*(?:confirmo|acepto)|sí[\s,!.]*(?:confirmo|acepto)|'
+        r'confirmo|acepto|understood[;,.!\s]+i\s+confirm)[.!]?\s*',
+        text, flags=re.I))
+
+
+def capture_explicit_visit_time(state: dict, message: str) -> dict:
+    """Record an unambiguous hour from the latest offer, even if Hermes misses the tool."""
+    text=str(message or '').lower()
+    if re.search(r'\b(?:not|no|instead|cancel|maybe|or)\b',text):
+        return {'ok':True,'captured':False}
+    times=[]
+    for m in re.finditer(r'\b(\d{1,2})(?::(00))?\s*(am|pm)\b|\b([01]\d|2[0-3]):00\b',text,re.I):
+        if m.group(4):
+            times.append(m.group(4)+':00')
+        else:
+            hour=int(m.group(1))%12+(12 if m.group(3)=='pm' else 0)
+            times.append(f'{hour:02d}:00')
+    if len(set(times))!=1:
+        return {'ok':True,'captured':False}
+    day=state.get('last_offered_date')
+    # An explicitly specified YYYY-MM-DD may override the last offered day.
+    specified=re.search(r'\b20\d{2}-\d{2}-\d{2}\b',text)
+    if specified:day=specified.group(0)
+    if not day:
+        return {'ok':True,'captured':False}
+    offers=[o for o in (state.get('booking_offers') or {}).values()
+            if o.get('date')==day and o.get('selected_unit_id')==_draft(state).get('unit_id') and
+            o.get('status')=='offered' and
+            any(x['start_time']==times[0] for x in o.get('options',[]))]
+    if not offers:
+        candidate=state.get('booking_proposal')
+        if candidate and candidate.get('date')==day and candidate.get('status')=='offered':
+            offers=[candidate]
+    if not offers:
+        return {'ok':True,'captured':False}
+    selected=select_visit_time(state,offers[-1]['proposal_id'],day,times[0])
+    if selected.get('ok'):
+        record(state,'visit_time_captured',f'{day} {times[0]} from an explicit buyer message')
+        return {'ok':True,'captured':True,'selection':selected}
+    return {'ok':True,'captured':False,'reason':selected.get('error')}
+
+
+def ready_to_finalize_visit(state: dict) -> bool:
+    draft=_draft(state)
+    return bool(draft.get('status')=='awaiting_confirmation'
+        and draft.get('proposal_id')
+        and _explicit_lead_confirmation(state)
+        and (state.get('booking_proposal') or {}).get('proposal_id')==draft.get('proposal_id'))
 
 
 def book_visit(state: dict, first_name: str, last_name: str, email: str,
@@ -1111,7 +1446,7 @@ def book_visit(state: dict, first_name: str, last_name: str, email: str,
             proposal.get('selected_source_message_id') == state.get('_active_source_message_id')):
         return {'error': 'The lead must explicitly choose the offered hour, then confirm in a later turn.'}
     units = {u['unit_id']: u for u in read_catalog()['properties']}
-    chosen = unit_id or state['lead'].get('interest_unit_id')
+    chosen = unit_id or _draft(state).get('unit_id') or state['lead'].get('interest_unit_id')
     if not chosen or chosen not in units or chosen != proposal['selected_unit_id']:
         return {'error': 'Explicitly select one available house before confirming its visit.'}
     if _draft(state).get('unit_id') != chosen:
@@ -1187,6 +1522,7 @@ def book_visit(state: dict, first_name: str, last_name: str, email: str,
     state['booked_visits'].append(booking)
     proposal['status'] = 'pending_assignment'; proposal['meeting_id'] = meeting_id
     _draft(state)['status'] = 'pending_commit'
+    state['confirmation_request']=None
     bp['sales_dialogue_states']['state_json']['booking_proposal'] = None
     record(state, 'booking_pending', f'Awaiting transactional assignment for {chosen} {day} {start_time}')
     return {'ok': True, 'pending_commit': True, 'unit_id': chosen, 'date': day,
@@ -1268,6 +1604,10 @@ def profile_snapshot(state: dict) -> dict:
     facts = (bp.get('leads') or {}).get('lead_profile_data', {}).get('sales_profile', {}).get('current', {})
     return {
         'lead': dict(state.get('lead') or {}),
+        'search_preferences': copy.deepcopy(_preferences(state)),
+        'recent_preferences_changes': copy.deepcopy(state.get('search_preferences_history', [])[-3:]),
+        'confirmation_request': copy.deepcopy(state.get('confirmation_request')),
+        'last_offered_date': state.get('last_offered_date'),
         'stage': state.get('stage'),
         'exploring_unit_id': state.get('exploring_unit_id'),
         'conversation_focus': copy.deepcopy(_focus(state)),

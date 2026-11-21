@@ -8,12 +8,13 @@ import SalesCalendar from './calendar';
 
 type Unit={location?:{address?:string;city?:string;country?:string;district?:string|null;maps_url?:string|null;map_scope?:string;verification_status?:string;note?:string};unit_id:string;blackpenguin_unit_id:string;property_type_id:string;property_type:'Apartment'|'House';commercial_name:string;property_type_code?:string;property_type_description?:string;bedrooms:number;bathrooms:number;area_sqm:number;lot_area_m2?:number|null;floor_number?:number|null;price_usd:number;currency?:string;available_from_date:string;status:string;confirmed_features?:Record<string,string|number|boolean>;highlights:string[];media:{gallery_urls:string[];gallery_url:string|null;floorplan_brochure_pdf:string|null;documents:{type:string;title:string;url:string;scope:'unit';unit_id:string}[]};demo_inventory_last_updated_at?:string;publication_status?:string;inventory_is_live?:boolean;phase_id?:string;phase_name?:string;property_model?:{model_name:string;code:string;bedrooms?:number;bathrooms?:number;built_area_min_m2?:number;built_area_max_m2?:number;lot_area_min_m2?:number;lot_area_max_m2?:number;total_units?:number;review_status?:string;inventory_updated_at?:string;verified_type_features?:{feature_key:string;verification_status:string;value_text?:string;value_number?:string;value_bool?:boolean}[]};};
 type Catalog={project_info:{name:string;developer:string;project_type?:string;development_status?:string;short_description?:string;long_description?:string;project_code?:string;value_proposition:string;amenities:string[];phase_names?:string[];published_revision?:number;inventory_summary?:{total_units:number;available_units:number;reserved_units:number};general_brochure_pdf:string;location:{street_address:string;city:string;country:string;timezone?:string}};properties:Unit[]};
+type SearchPreferences={revision:number;budget:{mode:string;minimum_usd:number|null;maximum_usd:number|null;target_usd:number|null;exact_price_usd:number|null;currency?:string};bedrooms:{mode:string;minimum:number|null;maximum:number|null;preferred:number|null};last_source_message_id?:string|null};
 type Fact={id:string;field:string;value:unknown;status:string;source:string;evidence?:string;captured_at?:string;source_ref?:{message_id?:string}};
 type Booking={meeting_id:string;advisor_name:string|null;unit_id:string|null;date:string;start_time:string;end_time:string;status:string;visit_location?:{label:string;address?:string;maps_url:string|null;verification_status:string}};
-type State={conversation_focus?:{project_id?:string;unit_id?:string|null;ambiguous?:boolean};visit_draft?:{unit_id?:string|null;date?:string|null;start_time?:string|null;status?:string};last_slot_search?:{result_code?:string;requested?:string};exploring_unit_id?:string|null;ui_fact_evidence?:Record<string,Evidence>;tool_observations?:ToolObservation[];lead:{first_name:string|null;last_name:string|null;phone:string|null;email:string|null;budget_usd:number|null;purchase_timeframe:string|null;property_type:string|null;min_bedrooms:number|null;interest_unit_id:string|null};stage:string;turn_count:number;shortlisted_unit_ids:string[];booked_visits:Booking[];property_interests?:{unit_id:string;status:string;source_message_id?:string}[];booking_proposal?:{proposal_id:string;status:string;expires_at:string;options:{date:string;start_time:string}[]}|null;bp_episode?:{leads:{lead_profile_data:{sales_profile:{current:Record<string,Fact>}}}}};
+type State={search_preferences?:SearchPreferences;search_preferences_history?:{prior:SearchPreferences;changes:unknown;source_message_id?:string;changed_at?:string}[];confirmation_request?:{unit_id:string;date:string;start_time:string}|null;last_offered_date?:string|null;shared_media?:Record<string,{gallery_sent?:boolean;document_urls_sent?:string[]}>;conversation_focus?:{project_id?:string;unit_id?:string|null;ambiguous?:boolean};visit_draft?:{unit_id?:string|null;date?:string|null;start_time?:string|null;status?:string};last_slot_search?:{result_code?:string;requested?:string;date?:string};exploring_unit_id?:string|null;ui_fact_evidence?:Record<string,Evidence>;tool_observations?:ToolObservation[];lead:{first_name:string|null;last_name:string|null;phone:string|null;email:string|null;budget_usd:number|null;purchase_timeframe:string|null;property_type:string|null;min_bedrooms:number|null;interest_unit_id:string|null};stage:string;turn_count:number;shortlisted_unit_ids:string[];booked_visits:Booking[];property_interests?:{unit_id:string;status:string;source_message_id?:string}[];booking_proposal?:{proposal_id:string;status:string;expires_at:string;options:{date:string;start_time:string}[]}|null;bp_episode?:{leads:{lead_profile_data:{sales_profile:{current:Record<string,Fact>}}}}};
 type Evidence={source_message_id?:string;message_id?:string;captured_at?:string;evidence?:string;source?:string};
 type ToolObservation={tool:string;status:string;fields:string[];timestamp:string;message_id?:string;error_code?:string|null};
-type ProfilePreview={lead:State['lead'];stage:string;conversation_focus?:State['conversation_focus'];visit_draft?:State['visit_draft'];last_slot_search?:State['last_slot_search'];exploring_unit_id?:string|null;property_interests:NonNullable<State['property_interests']>;facts:Record<string,Fact>;ui_fact_evidence:Record<string,Evidence>;tool_observations:ToolObservation[]};
+type ProfilePreview={lead:State['lead'];stage:string;search_preferences?:SearchPreferences;recent_preferences_changes?:State['search_preferences_history'];confirmation_request?:State['confirmation_request'];last_offered_date?:string|null;conversation_focus?:State['conversation_focus'];visit_draft?:State['visit_draft'];last_slot_search?:State['last_slot_search'];exploring_unit_id?:string|null;property_interests:NonNullable<State['property_interests']>;facts:Record<string,Fact>;ui_fact_evidence:Record<string,Evidence>;tool_observations:ToolObservation[]};
 type Message={id:string;role:'user'|'assistant';content:string;created_at:string;sequence_number?:number};
 type Lead={id:string;conversation_id:string;first_name:string;last_name:string;email:string;phone:string;updated_at:string;created_at:string;revision:number;state:State;messages:Message[]};
 type Summary={id:string;conversation_id:string;first_name:string;last_name:string;updated_at:string;last_message:string|null};
@@ -136,6 +137,10 @@ export default function Page(){
   const viewLead=liveProfile?.lead||state?.lead;
   const conversationFocus=liveProfile?.conversation_focus||state?.conversation_focus;
   const visitDraft=liveProfile?.visit_draft||state?.visit_draft;
+  const preferences=liveProfile?.search_preferences||state?.search_preferences;
+  const budgetPrefs=preferences?.budget;
+  const bedroomPrefs=preferences?.bedrooms;
+  const focusCalendarDate=(liveProfile?.last_slot_search?.date||state?.last_slot_search?.date||visitDraft?.date||null);
   const profileFacts=liveProfile?.facts||state?.bp_episode?.leads?.lead_profile_data?.sales_profile?.current||{};
   const profileEvidence=liveProfile?.ui_fact_evidence||state?.ui_fact_evidence||{};
   const interests=liveProfile?.property_interests||state?.property_interests||[];
@@ -271,7 +276,7 @@ export default function Page(){
               <div className="filter-row"><strong>{properties.length} houses for sale</strong></div>
               <div className="unit-list">{properties.map(u=><button className="unit-row" key={u.unit_id} onClick={()=>setSelected(u)}><div className="unit-thumb">{u.media.gallery_urls.length?<img src={u.media.gallery_urls[0]} alt={`Illustration of ${u.unit_id}`}/>:<Images size={20}/>}</div><div><div className="unit-name"><strong>{u.unit_id}</strong><span>{u.property_type}</span></div><p>{u.commercial_name}</p><div className="unit-metrics"><BedDouble size={12}/>{u.bedrooms} <Bath size={12}/>{u.bathrooms} <Square size={12}/>{u.area_sqm} m²</div><div className="unit-price">{usd.format(u.price_usd)}<small>{u.status}</small></div></div><ChevronRight size={16}/></button>)}</div>
               <p className="fineprint">House prices and availability are synthetic. Full published facts are available in each house record; reserved homes are never recommended.</p>
-            </>:<SalesCalendar refresh={calendarTick}/>}
+            </>:<SalesCalendar refresh={calendarTick} focusDate={focusCalendarDate}/>}
           </div>
         </section>
         <section className="panel chat-panel"><div className="panel-top chat-top"><div><h2>Hermes conversation</h2><small>{active?`${active.first_name} ${active.last_name} · ${active.state.turn_count}/${turnLimit} turns`:'No lead selected'}</small></div><div className="chat-actions">{active&&<button className="ghost compact" onClick={downloadConversation} title="Export full conversation and lead state"><Download size={14}/> JSON</button>}<button className="primary compact" onClick={()=>setShowCreate(true)}><Plus size={14}/> New lead</button></div></div>
@@ -297,10 +302,21 @@ export default function Page(){
           <div className="panel-scroll lead-scroll">{active&&state?<>{liveProfile&&<p className="profile-preview-note">Provisional facts · awaiting Hermes completion and Turso commit</p>}
             <section className="state-section"><h3>Contact</h3><FactRow label="Name" value={`${viewLead?.first_name||active.first_name} ${viewLead?.last_name||active.last_name}`} evidence={profileEvidence.first_name||profileEvidence.last_name} timeZone={timeZone} onLocate={locateMessage}/><FactRow label="Phone" value={viewLead?.phone||active.phone} evidence={profileEvidence.phone} timeZone={timeZone} onLocate={locateMessage}/><FactRow label="Email" value={viewLead?.email||active.email} evidence={profileEvidence.email} timeZone={timeZone} onLocate={locateMessage}/></section>
             <section className="state-section"><h3>Qualification</h3>
-              <FactRow label="Budget" value={viewLead?.budget_usd?usd.format(viewLead.budget_usd):profileFacts.budget?.value} evidence={profileFacts.budget?{...profileFacts.budget,source_message_id:profileFacts.budget.source_ref?.message_id}:undefined} timeZone={timeZone} onLocate={locateMessage}/>
+              <FactRow label="Budget interpretation" value={budgetPrefs?.mode?.replaceAll('_',' ')||'Not captured'} evidence={profileEvidence.budget_usd} timeZone={timeZone} onLocate={locateMessage}/>
+              <FactRow label="Minimum budget" value={budgetPrefs?.minimum_usd!=null?usd.format(budgetPrefs.minimum_usd):null} evidence={profileEvidence.budget_usd} timeZone={timeZone} onLocate={locateMessage}/>
+              <FactRow label="Maximum budget" value={budgetPrefs?.maximum_usd!=null?usd.format(budgetPrefs.maximum_usd):viewLead?.budget_usd?usd.format(viewLead.budget_usd):null} evidence={profileEvidence.budget_usd} timeZone={timeZone} onLocate={locateMessage}/>
+              <FactRow label="Target budget" value={budgetPrefs?.target_usd!=null?usd.format(budgetPrefs.target_usd):null} evidence={profileEvidence.budget_usd} timeZone={timeZone} onLocate={locateMessage}/>
+              {budgetPrefs?.exact_price_usd!=null&&<FactRow label="Exact listing price" value={usd.format(budgetPrefs.exact_price_usd)} evidence={profileEvidence.budget_usd} timeZone={timeZone} onLocate={locateMessage}/>}
+              {preferences&&preferences.revision>0&&<small className="muted">Preferences revision {preferences.revision} · changes preserved with message evidence</small>}
               <FactRow label="Purchase timeframe" value={viewLead?.purchase_timeframe||profileFacts.purchase_timeline?.value} evidence={profileFacts.purchase_timeline?{...profileFacts.purchase_timeline,source_message_id:profileFacts.purchase_timeline.source_ref?.message_id}:undefined} timeZone={timeZone} onLocate={locateMessage}/>
               <FactRow label="Property type" value={viewLead?.property_type} evidence={profileEvidence.property_type} timeZone={timeZone} onLocate={locateMessage}/>
-              <FactRow label="Bedrooms" value={viewLead?.min_bedrooms} evidence={profileFacts.bedrooms?{...profileFacts.bedrooms,source_message_id:profileFacts.bedrooms.source_ref?.message_id}:undefined} timeZone={timeZone} onLocate={locateMessage}/>
+              <FactRow label="Bedroom criteria" value={bedroomPrefs&&bedroomPrefs.mode!=='unknown'?(
+                bedroomPrefs.mode==='range'? `${bedroomPrefs.minimum}–${bedroomPrefs.maximum} bedrooms`:
+                bedroomPrefs.mode==='minimum'? `At least ${bedroomPrefs.minimum}`:
+                bedroomPrefs.mode==='maximum'? `At most ${bedroomPrefs.maximum}`:
+                bedroomPrefs.mode==='exact'? `Exactly ${bedroomPrefs.preferred}`:
+                `Prefer ${bedroomPrefs.preferred}`
+              ):viewLead?.min_bedrooms} evidence={profileFacts.bedrooms?{...profileFacts.bedrooms,source_message_id:profileFacts.bedrooms.source_ref?.message_id}:undefined} timeZone={timeZone} onLocate={locateMessage}/>
               <small className="stage-label">{liveProfile?.stage||state.stage}</small>
             </section>
             <section className="state-section"><h3>Project focus</h3>
@@ -320,7 +336,15 @@ export default function Page(){
               {additionalFacts.map(f=><FactRow key={f.id} label={f.field.replaceAll('_',' ')} value={f.value}
                 evidence={{...f,source_message_id:f.source_ref?.message_id}} timeZone={timeZone} onLocate={locateMessage}/>)}
             </section>}
-            {observations.length>0&&<details className="inspector"><summary>Capture activity · Hermes tools and validation ({observations.length})</summary>
+            {observations.length>0&&<section className="state-section agent-work"><h3>Agent activity {liveProfile?'· provisional':'· saved'}</h3>
+              {observations.slice(-4).map((o,i)=><div className="agent-work-row" key={o.timestamp+':'+i}>
+                {o.status==='rejected'?<Info size={13} className="agent-work-error"/>:liveProfile?<Info size={13} className="agent-work-pending"/>:<Check size={13} className="agent-work-done"/>}
+                <div><strong>{o.tool.replaceAll('_',' ')}</strong>
+                  <small>{o.error_code||o.status}{o.fields.length?' · '+o.fields.join(', '):''}</small></div>
+              </div>)}
+              <small className="muted">Green checks indicate persisted, successful operations. Provisional steps are not yet saved.</small>
+            </section>}
+            {observations.length>0&&<details className="inspector"><summary>Full agent tool trace ({observations.length})</summary>
               {observations.slice(-8).map((o,i)=><div className="evidence-line" key={`${o.timestamp}-${i}`}>
                 <strong>{o.tool} · {o.status}{o.error_code?` · ${o.error_code}`:''}</strong><small>{o.fields.join(', ')} · {formatChatTimestamp(o.timestamp,timeZone)}</small>
               </div>)}
