@@ -23,6 +23,8 @@ def normalize(text: str) -> str:
     text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
     text = re.sub(r'(?<!\w)\*([^*\n]+)\*(?!\w)', r'\1', text)
     text = re.sub(r'`([^`]+)`', r'\1', text)
+    # Express square metres without the UCS-2 superscript; meaning is unchanged.
+    text = text.replace('m²', 'sq m')
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
 
@@ -51,49 +53,77 @@ def details(text: str) -> dict:
             'single_limit': single, 'multipart_limit': concat}
 
 
-def _chunks(text: str, max_units: int, charset: str) -> list[str]:
-    """Word-aware chunks; do not split an HTTPS link or lose any words."""
-    paragraphs = re.split(r'\s+', text.strip())
-    parts: list[str] = []
-    current = ''
-    for word in paragraphs:
-        if not word:
+# GSM-7 transport fragments (153 characters when concatenated) are NOT
+# standalone conversations. They are reassembled by the recipient device.
+# One stored message may be two physical SMS segments. A longer Hermes reply
+# can be separated into natural, independent messages using real boundaries.
+# Never cut a link, measurement, sentence, or field heading in the middle.
+_MAX_LOGICAL_SMS_SEGMENTS = 2
+
+# The boundary markers below are anchored to content structure instead of
+# arbitrary word counts. Lookbehind deliberately excludes numbered unit list
+# markers such as "2. H-204".
+_NATURAL_BREAK = re.compile(
+    r'\n+'
+    r'|(?<!\d\.)(?<=[.!?])\s+(?=[A-Z])'
+    r'|\s+(?=\d+\.\s+H-\d+\b)'
+    r'|\s+(?=(?:View Gallery|Property Fact Sheet|Floor Plan):\s+https://)'
+    r'|\s+(?=Since you\b)',
+    re.IGNORECASE,
+)
+_FIELD_BREAK = re.compile(
+    r'\s+-\s+(?=(?:Price|Bedrooms|Bathrooms|Features|Status|Availability|View Gallery|Property Fact Sheet):)',
+    re.IGNORECASE,
+)
+
+
+def _natural_parts(plain: str) -> list[str]:
+    parts = []
+    for phrase in _NATURAL_BREAK.split(plain):
+        phrase = phrase.strip(' \n')
+        if not phrase:
             continue
-        candidate = f'{current} {word}' if current else word
-        if units(candidate, charset) <= max_units:
-            current = candidate
-            continue
-        if current:
-            parts.append(current)
-            current = ''
-        if units(word, charset) <= max_units:
-            current = word
-        elif word.startswith('https://'):
-            # Splitting an URL would make it unusable; reject as an explicit
-            # validation error rather than shipping a broken link.
-            raise ValueError('Approved link exceeds one SMS segment.')
-        else:
-            chunk = ''
-            for char in word:
-                if units(chunk + char, charset) > max_units:
-                    parts.append(chunk)
-                    chunk = char
-                else:
-                    chunk += char
-            current = chunk
-    if current:
-        parts.append(current)
-    return parts
+        if details(phrase)['segments'] > _MAX_LOGICAL_SMS_SEGMENTS:
+            # Field-like labels are a safe fallback for long real-estate lists.
+            # Keep every label + its value, e.g. "Gallery: https://...".
+            pieces = _FIELD_BREAK.split(phrase)
+            if len(pieces) > 1:
+                parts.extend(piece.strip(' \n-') for piece in pieces if piece.strip(' \n-'))
+                continue
+        parts.append(phrase.strip(' \n-'))
+    return [p for p in parts if p]
 
 
 def outgoing_segments(text: str) -> list[str]:
+    """Return receiver-visible messages, never carrier-sized word fragments.
+
+    Each item is a coherent message (normally up to two *transport* segments).
+    If a single statement or HTTPS link does not have a safe internal boundary,
+    preserve it as one multipart message rather than truncating or corrupting
+    the content. Use details(message) for the real number of carrier segments.
+    """
     plain = normalize(text)
     if not plain:
         raise ValueError('Cannot send an empty SMS.')
-    charset = encoding(plain)
-    # Each outgoing bubble is at most one SMS segment. If the original response
-    # requires multipart, use the conservative concatenated-segment budget.
-    single = 160 if charset == 'GSM-7' else 70
-    if units(plain, charset) <= single:
+    if details(plain)['segments'] == 1:
         return [plain]
-    return _chunks(plain, 153 if charset == 'GSM-7' else 67, charset)
+    blocks = _natural_parts(plain)
+    messages = []
+    current = ''
+    for block in blocks:
+        # Short label-like facts are joined with a separator, never concatenated
+        # into an invalid "...Bedrooms: 2 Bathrooms: 2" run-on string.
+        if current and block.lower().startswith(('since you ',)):
+            messages.append(current)
+            current = ''
+        joiner = ('; ' if current and ':' in block and not current.endswith(':')
+                  and not block.startswith('https://') else ' ')
+        candidate = f'{current}{joiner}{block}' if current else block
+        if current and details(candidate)['segments'] > _MAX_LOGICAL_SMS_SEGMENTS:
+            messages.append(current)
+            current = block
+        else:
+            current = candidate
+    if current:
+        messages.append(current)
+    return messages

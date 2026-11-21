@@ -176,9 +176,12 @@ def test_sms_plain_text_link_segments_and_unicode():
     assert sms.details('a' * 161)['segments'] == 2
     assert sms.details('🏡')['encoding'] == 'UCS-2'
     assert sms.details('🏡')['units'] == 2
-    assert all(sms.details(seg)['segments'] == 1 for seg in sms.outgoing_segments('🏡' * 45))
-    with pytest.raises(ValueError, match='Approved link'):
-        sms.outgoing_segments('https://' + 'a' * 180 + '.example')
+    assert len(sms.outgoing_segments('🏡' * 45)) == 1  # two carrier segments, one receiver-visible message
+    assert sms.details(sms.outgoing_segments('🏡' * 45)[0])['segments'] == 2
+    # Long URLs remain intact as one receiver-visible concatenated SMS.
+    long_link = 'https://' + 'a' * 180 + '.example'
+    assert sms.outgoing_segments(long_link) == [long_link]
+    assert sms.details(long_link)['segments'] == 2
 
 
 def test_unconfirmed_advisor_names_are_redacted_until_saved():
