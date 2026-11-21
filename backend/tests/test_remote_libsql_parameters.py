@@ -69,11 +69,11 @@ def test_initialize_fixture_and_agent_booking_use_remote_compatible_bindings(tmp
 
     domain.begin_turn(state, f'I choose {option["start_time"]} for the H-201 visit')
     assert domain.select_visit_time(state, offer['proposal_id'], option['date'], option['start_time'])['ok']
-    domain.end_turn(state, 'Please confirm your choice')
+    domain.end_turn(state, 'For H-201 on the selected day and time, please reply Yes, I confirm. Confirm?')
     db.save_turn(auth, lead['id'], 1, state, [],
-                 f'I choose {option["start_time"]} for the H-201 visit', 'Please confirm your choice')
+                 f'I choose {option["start_time"]} for the H-201 visit', 'For H-201 on the selected day and time, please reply Yes, I confirm. Confirm?')
 
-    domain.begin_turn(state, 'Yes, book that visit')
+    domain.begin_turn(state, 'Yes, I confirm')
     booked = domain.book_visit(
         state, 'Alex', 'Rivera', 'alex@example.test', '+51999999999',
         date_str=option['date'], start_time=option['start_time'], proposal_id=offer['proposal_id'], unit_id='H-201',
