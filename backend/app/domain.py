@@ -816,7 +816,7 @@ def slots(state: dict, date_str: str | None = None, *,
     exact_date = None
     if date_str and not relative:
         try:
-            exact_date = date.fromisoformat(date_input(date_str))
+            exact_date = date.fromisoformat(_resolve_visit_date(state, date_str))
         except (ValueError, TypeError):
             return _slot_error('INVALID_DATE',
                 'Please give a date, for example November 27, or say next week.',
@@ -880,9 +880,8 @@ def slots(state: dict, date_str: str | None = None, *,
         queries[key] = copy.deepcopy(result)
         return result
     if not options:
-        state['booking_proposal'] = None
-        dialogue = state['bp_episode']['sales_dialogue_states']['state_json']
-        dialogue['booking_proposal'] = None
+        # A failed exploratory search must not delete a previously selected hour.
+        # The buyer may switch back to the last valid proposal while it lives.
         same_day = scheduling.public_start_times([
             item for item in all_slots if item['date'] == exact_date.isoformat()])
         result = _slot_error('NO_SLOTS',
@@ -895,6 +894,17 @@ def slots(state: dict, date_str: str | None = None, *,
                                     'time_preference': time_preference, 'result_code': 'NO_SLOTS'}
         queries[key] = copy.deepcopy(result)
         return result
+    state['last_offered_date'] = exact_date.isoformat()
+    # Look up previously offered choices without assuming the most recent
+    # query is the buyer's selected appointment.
+    candidates=list((state.get('booking_offers') or {}).values())
+    if previous and previous.get('proposal_id') not in {p.get('proposal_id') for p in candidates}:
+        candidates.append(previous)
+    previous=next((p for p in reversed(candidates) if
+        p.get('selected_unit_id')==unit_id and
+        p.get('date')==exact_date.isoformat() and
+        p.get('time_preference')==time_preference and
+        p.get('status')=='offered'), {})
     if (previous.get('status') == 'offered' and previous.get('selected_unit_id') == unit_id
             and previous.get('date') == exact_date.isoformat()
             and previous.get('time_preference') == time_preference):
@@ -907,6 +917,9 @@ def slots(state: dict, date_str: str | None = None, *,
                           'proposal_id': previous['proposal_id'],
                           'expires_at': previous['expires_at'], 'timezone': pol['timezone'],
                           'notice': 'Existing proposal; slots are not reserved.'}
+                state['last_slot_search']={'unit_id':unit_id,'requested':date_str,
+                    'date':exact_date.isoformat(),'time_preference':time_preference,
+                    'result_code':'OK'}
                 queries[key] = copy.deepcopy(result)
                 return result
         except (KeyError, ValueError, TypeError):
@@ -920,16 +933,29 @@ def slots(state: dict, date_str: str | None = None, *,
                 'time_preference': time_preference, 'options': options,
                 'offer_source_message_id': state.get('_active_source_message_id'),
                 'expires_at': expires_at, 'timezone': pol['timezone']}
-    state['booking_proposal'] = proposal
-    draft.update(unit_id=unit_id, date=exact_date.isoformat(), status='hour_needed')
+    offers=state.setdefault('booking_offers',{})
+    offers[proposal_id]=proposal
+    # Bound memory growth. No booked appointment is ever deleted by this cache.
+    if len(offers)>20:
+        for old_id in list(offers)[:-20]:
+            if old_id!=draft.get('proposal_id'):
+                offers.pop(old_id,None)
+    selected=(draft.get('status')=='awaiting_confirmation' and
+              draft.get('unit_id')==unit_id and draft.get('proposal_id') and
+              draft.get('start_time'))
+    if not selected:
+        state['booking_proposal']=proposal
+        draft.update(unit_id=unit_id,date=exact_date.isoformat(),
+                     start_time=None,proposal_id=None,status='hour_needed')
     dialogue = state['bp_episode']['sales_dialogue_states']['state_json']
     dialogue['booking_search'] = {'requested_date': exact_date.isoformat(),
                                   'timezone': pol['timezone'],
                                   'unit_id': unit_id, 'time_preference': time_preference}
-    dialogue['booking_proposal'] = copy.deepcopy(proposal)
+    dialogue['booking_proposal'] = copy.deepcopy(state.get('booking_proposal'))
     dialogue['visit_draft'] = copy.deepcopy(draft)
     state['bp_episode']['sales_dialogue_states']['revision'] += 1
     state['last_slot_search'] = {'unit_id': unit_id, 'requested': date_str,
+                                'date':exact_date.isoformat(),
                                 'time_preference': time_preference, 'result_code': 'OK'}
     record(state, 'slot_offer',
            f'{len(options)} hourly start times offered for {unit_id} on {exact_date.isoformat()}')
