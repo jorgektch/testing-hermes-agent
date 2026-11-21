@@ -57,3 +57,21 @@
 .agent-work-done{color:#86c59a}
 .agent-work-error{color:#e39b8d}
 .agent-work-pending{color:#a5a5a5}
+
+/* v13: reversible commercial phases and independent appointment draft. */
+.sales-journey{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin:11px 0 9px}
+.sales-phase{display:flex;align-items:center;flex-direction:column;gap:7px;text-align:center;background:#171717;border:1px solid #303030;border-radius:7px;padding:11px 4px;color:#898989;min-width:0}
+.sales-phase strong{font-size:10px;font-weight:600}
+.sales-phase-index{width:23px;height:23px;display:grid;place-items:center;border-radius:50%;border:1px solid #464646;font-size:11px;font-weight:700}
+.sales-phase.is-active{background:#2c2413;border-color:#8f6a1e;color:#f5c66d}
+.sales-phase.is-active .sales-phase-index{background:#dd9800;border-color:#dd9800;color:#1a1508}
+.sales-phase.was-visited .sales-phase-index{border-color:#43885f;color:#92caa4}
+.journey-summary{display:flex;justify-content:space-between;gap:6px;align-items:center;padding:6px 0;font-size:10px}
+.journey-summary span{color:#a6a6a6}
+.journey-summary strong{text-align:right}
+.active-search-panel{display:flex;flex-direction:column;gap:6px;padding:10px;margin-top:5px;background:#171717;border:1px solid #44402f;border-radius:7px}
+.active-search-head{display:flex;gap:6px;align-items:center;color:#ebbe69;font-size:11px}
+.active-search-head span{margin-left:auto;color:#a8a8a8;font-size:10px}
+.active-search-panel>small{font-size:10px;color:#bdbdbd}
+.paused-visit-note{display:flex;gap:8px;align-items:flex-start;margin-top:8px;padding:10px;background:#211d17;border:1px solid #65563b;border-radius:6px;color:#d8c6a6;font-size:10px;line-height:1.45}
+.paused-visit-note svg{flex:none;margin-top:1px}
