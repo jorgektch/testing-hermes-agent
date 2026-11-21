@@ -1114,6 +1114,19 @@ def update_lead(state: dict, **kwargs: Any) -> dict:
     if isinstance(interest,str) and interest in {u['unit_id'] for u in read_catalog()['properties']}:
         if 'interest_unit_id' not in changed and lead.get('interest_unit_id')!=interest:
             changed['interest_unit_id']=interest
+    # A model replay of a parsed buyer declaration must not reintroduce a
+    # stale spending ceiling or turn an exact/preferred bedroom count into MIN.
+    structured=_preferences(state)
+    if structured.get('last_source_message_id')==state.get('_active_source_message_id'):
+        declared=sales_preferences.parse_declarations(state.get('_active_source_message_text') or '')
+        if 'budget' in declared:
+            for field in ('budget_usd',):
+                changed.pop(field,None)
+            for field in ('budget_minimum','budget_maximum','budget'):
+                bp_changed.pop(field,None)
+        if 'bedrooms' in declared:
+            changed.pop('min_bedrooms',None)
+            bp_changed.pop('bedrooms',None)
     if changed or bp_changed:
         lead.update(changed)
         # UI-only fields (e.g. House vs Apartment) are not part of BP's 16
@@ -1137,6 +1150,24 @@ def update_lead(state: dict, **kwargs: Any) -> dict:
                     del merged[alias]
             merged[field]=value
         _capture_bp_facts(state, merged)
+        # Normalize legacy Hermes profile writes that were not already parsed
+        # from a direct declaration; otherwise only the UI mirror would change.
+        current_source=state.get('_active_source_message_id')
+        if _preferences(state).get('last_source_message_id')!=current_source:
+            budgets={}
+            if 'budget_maximum' in bp_changed:
+                budgets={'mode':'cap','maximum_usd':bp_changed['budget_maximum']}
+            elif 'budget_usd' in changed:
+                budgets={'mode':'cap','maximum_usd':changed['budget_usd']}
+            if 'budget_minimum' in bp_changed:
+                budgets['minimum_usd']=bp_changed['budget_minimum']
+                budgets['mode']='range' if 'maximum_usd' in budgets else 'floor'
+            beds={}
+            if 'min_bedrooms' in changed or 'bedrooms' in bp_changed:
+                beds={'mode':'minimum','minimum':bp_changed.get('bedrooms',changed.get('min_bedrooms'))}
+            if budgets or beds:
+                sales_preferences.apply(state,
+                    {'budget':budgets,'bedrooms':beds}, source_message_id=current_source)
         if changed.get('interest_unit_id'):
             _set_focus(state, changed['interest_unit_id'])
         if lead.get('budget_usd') and lead.get('purchase_timeframe'):
@@ -1188,16 +1219,36 @@ def verify_explicit_preferences(state: dict, message: str) -> dict:
     """
     values = explicitly_declared_preferences(message)
     missing = {key: val for key, val in values.items() if state['lead'].get(key) != val}
-    if not missing:
-        return {'ok': True, 'changed_fields': {}}
-    response = update_lead(state, **missing)
-    if response.get('ok'):
+    if missing:
+        response = update_lead(state, **missing)
+        if response.get('error'):
+            return response
         state.setdefault('tool_observations', []).append({
-            'tool': 'explicit_preference_validator', 'status': 'applied',
-            'fields': list(missing), 'message_id': state.get('_active_source_message_id'),
-            'timestamp': datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00','Z'),
+            'tool':'explicit_preference_validator','status':'applied',
+            'fields':list(missing),'message_id':state.get('_active_source_message_id'),
+            'timestamp':now_local().isoformat(),
         })
-        state['tool_observations'] = state['tool_observations'][-50:]
+    else:
+        response={'ok':True,'changed_fields':{}}
+    explicit=sales_preferences.parse_declarations(message)
+    if explicit:
+        typed={}
+        for name,values in explicit.items():
+            for k,v in values.items():
+                alias={'minimum_usd':'budget_minimum_usd','maximum_usd':'budget_maximum_usd',
+                       'target_usd':'budget_target_usd','exact_price_usd':'budget_exact_price_usd',
+                       'mode':f'{name}_mode','minimum':'bedrooms_min','maximum':'bedrooms_max',
+                       'preferred':'bedrooms_preferred'}.get(k)
+                if alias:typed[alias]=v
+        result=update_search_preferences(state,**typed)
+        if result.get('error'):return result
+        if result.get('changed_fields'):
+            state.setdefault('tool_observations',[]).append({
+                'tool':'explicit_preference_validator','status':'applied',
+                'fields':result['changed_fields'],
+                'message_id':state.get('_active_source_message_id'),
+                'timestamp':now_local().isoformat()})
+    state['tool_observations']=state.get('tool_observations',[])[-50:]
     return response
 
 
@@ -1404,6 +1455,10 @@ def profile_snapshot(state: dict) -> dict:
     facts = (bp.get('leads') or {}).get('lead_profile_data', {}).get('sales_profile', {}).get('current', {})
     return {
         'lead': dict(state.get('lead') or {}),
+        'search_preferences': copy.deepcopy(_preferences(state)),
+        'recent_preferences_changes': copy.deepcopy(state.get('search_preferences_history', [])[-3:]),
+        'confirmation_request': copy.deepcopy(state.get('confirmation_request')),
+        'last_offered_date': state.get('last_offered_date'),
         'stage': state.get('stage'),
         'exploring_unit_id': state.get('exploring_unit_id'),
         'conversation_focus': copy.deepcopy(_focus(state)),
