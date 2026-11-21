@@ -81,7 +81,8 @@ def _first_pending_meeting(state):
     choice = offer['available_slots'][0]
     domain.begin_turn(state, f'I choose {choice["start_time"]} for H-201.')
     assert domain.select_visit_time(state, offer['proposal_id'], choice['date'], choice['start_time'])['ok']
-    domain.begin_turn(state, 'Yes, book that offered visit please.')
+    domain.end_turn(state, 'For H-201 on that selected date and time, please reply Yes, I confirm. Confirm?')
+    domain.begin_turn(state, 'Yes, I confirm')
     result = domain.book_visit(state, 'Jamie', 'Park', 'jamie@example.test', '+51999999991',
                                date_str=choice['date'], start_time=choice['start_time'],
                                proposal_id=offer['proposal_id'], unit_id='H-201')
