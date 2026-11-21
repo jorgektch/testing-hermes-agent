@@ -14,7 +14,7 @@ _SEARCH=re.compile(
     r'\b(?:other|another|alternatives?|options?|looking for|search|find|'
     r'show me|show(?:ing)? (?:me )?(?:some|more)|have (?:any|other)|'
     r'anything (?:else|cheaper|larger)|'
-    r'(?:more|less) expensive|cheaper|larger|bigger|smaller|'
+    r'(?:more|less) expensive|more (?:area|space|bedrooms?)|fewer bedrooms?|cheaper|larger|bigger|smaller|'
     r'different (?:homes?|houses?|properties)|'
     r'under my budget|within my budget|'
     r'which (?:houses|homes|properties)|compare)\b',
