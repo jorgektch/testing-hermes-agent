@@ -17,6 +17,18 @@ TARGETS = [ROOT / 'shared' / 'catalog.json', ROOT / 'backend' / 'app' / 'catalog
 ASSET_ROOT = ROOT / 'frontend' / 'public'
 
 
+def _number(value):
+    """Publish canonical JSON integers for integral measurements.
+
+    Keeps regenerated public catalogs stable across the synthetic source,
+    Python projection and JSON round-trips.
+    """
+    if value is None:
+        return None
+    number=float(value)
+    return int(number) if number.is_integer() else number
+
+
 def _confirmed_feature_items(items: list[dict]) -> dict[str, object]:
     """Ignore unknown, unconfirmed and malformed facts instead of guessing."""
     result = {}
@@ -165,7 +177,7 @@ def build(allow_missing_assets: bool = False) -> dict:
                                           if f.get('verification_status')=='confirmed'],
             },
             'floor_number':u.get('floor_number'),
-            'lot_area_m2':float(u['lot_area_m2']) if u.get('lot_area_m2') is not None else None,
+            'lot_area_m2':_number(u.get('lot_area_m2')),
             'currency':u.get('currency'),
             'confirmed_features':typed,
             'publication_status':'published_for_demo_only',
@@ -173,7 +185,7 @@ def build(allow_missing_assets: bool = False) -> dict:
             'commercial_name':typ['name'],
             'bedrooms':u.get('bedrooms') if u.get('bedrooms') is not None else typ['bedrooms'],
             'bathrooms':u.get('bathrooms') if u.get('bathrooms') is not None else typ['bathrooms'],
-            'area_sqm':float(u['built_area_m2']),
+            'area_sqm':_number(u['built_area_m2']),
             'price_usd':int(float(u['list_price'])),
             'available_from_date':u.get('available_from') or 'Immediate',
             'status':'Available',  # marketing badge is derived after unit-level inventory checks
