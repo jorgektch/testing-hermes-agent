@@ -306,7 +306,13 @@ def _observe_inbound_context(state: dict, message: str) -> None:
         r'\b(?:i(?: am|m|\'m)? interested|i (?:want|like|prefer|choose|pick) '
         r'(?:that|this|the) (?:house|one|property)|i prefer that one)\b',
         message,re.I))
+    affirmative_only=bool(re.fullmatch(
+        r'\s*(?:yes|yes please|sure|certainly|of course)[.!]?\s*',
+        message,re.I))
+    pending_booking=bool(state.get('confirmation_request'))
     should_focus=(len(named)==1 or
+                  (affirmative_only and not pending_booking and
+                   resolution.get('unit_id') and not resolution.get('ambiguous')) or
                   (resolution.get('unit_id') and (
                       discussed or exploration_yes or interest_declared or
                       visit_intent or resolution.get('reason') in ('ordinal','comparative'))))
@@ -408,7 +414,7 @@ def begin_turn(state: dict, message: str) -> None:
 
 def _remember_answered_topics(state: dict, reply: str) -> None:
     """Record information actually delivered, not merely fetched by a tool."""
-    topic=state.get('_last_inbound_topic')
+    topic=state.get('_last_inbound_topic') or state.get('_pending_factual_topic_override')
     resolution=state.get('_turn_property_resolution') or {}
     unit_id=resolution.get('unit_id') or _focus(state).get('unit_id')
     details=state.get('_details_for_current_turn') or {}
@@ -492,6 +498,8 @@ def end_turn(state: dict, reply: str) -> None:
     state.pop('_matching_options_this_turn', None)
     state.pop('_details_for_current_turn', None)
     state.pop('_last_inbound_topic', None)
+    state.pop('_pending_factual_topic_override', None)
+    state.pop('_pending_fact_hint', None)
     state.pop('_slot_queries_this_turn', None)
     state.pop('_booking_completion_error', None)
     state.pop('_allowed_alternative_units_this_turn', None)
