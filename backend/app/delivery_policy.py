@@ -242,6 +242,29 @@ def validate_outbound(reply: str, state: dict) -> str:
         just_selected=bool(re.search(r'\b\d{1,2}(?::00)?\s*(?:am|pm)\b',active_user_text,re.I))
         if false_claim or wrong_day or just_selected:
             return _pending_visit_recap(state)
+    # A missing/incorrect Hermes search-tool call must not return the price
+    # of the *previously* discussed home. Recover from server-verified catalog
+    # only when the buyer clearly requested a new search.
+    if state.get('_turn_intent')=='property_search' and search_results is None:
+        from . import domain
+        outcome=domain.search_properties(state)
+        if outcome.get('ok'):
+            search_results=outcome['matching_properties']
+            state['_automatic_search_recovery']=True
+            state.setdefault('tool_observations',[]).append({
+                'tool':'search_response_recovery','status':'applied',
+                'fields':['property_search'],
+                'message_id':state.get('_active_source_message_id'),
+                'timestamp':domain.now_local().isoformat()})
+    if state.get('_turn_intent')=='property_search' and search_results is not None:
+        names={c.upper() for c in re.findall(r'\bH-\d+\b',plain,re.I)}
+        matches={u['unit_id'] for u in search_results}
+        allowed=set(state.get('_allowed_alternative_units_this_turn') or [])
+        if (state.get('_automatic_search_recovery') or
+                bool(names-matches-allowed) or
+                (not matches and not re.search(
+                    r'\b(?:no (?:matches|houses|options)|none|no properties)\b',plain,re.I))):
+            return _matching_reply(search_results)
     repaired=_verified_fact_reply(state,plain)
     if repaired is not None:
         state['_fact_answer_repaired_this_turn']=True
@@ -261,4 +284,4 @@ def validate_outbound(reply: str, state: dict) -> str:
                     r'\b(?:optional|alternative|different|extra)\b',plain,re.I))):
             return _matching_reply(search_results)
     _record_sent_media(state,plain)
-    return plain
+    return _suggest_available_assets(state,plain)
