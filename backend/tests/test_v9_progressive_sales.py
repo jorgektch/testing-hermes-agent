@@ -130,12 +130,13 @@ def test_media_tool_refuses_unsolicited_media_and_releases_one_requested_link(mo
         def __init__(self, **kw):
             self.valid_tool_names = list(handlers)
             assert kw['enabled_toolsets'] == [hermes_runtime.TOOLSET]
-        def run_conversation(self, message, conversation_history):
+        def run_conversation(self, message, conversation_history, persist_user_message=None):
+            assert persist_user_message in ('Tell me about H-201','Photos of H-201 please')
             requested = json.loads(handlers['get_unit_media']({'unit_id':'H-201'}))
-            if message == 'Tell me about H-201':
+            if persist_user_message == 'Tell me about H-201':
                 assert 'error' in requested
                 response = 'H-201 is a two-bedroom house. Would you like photos?'
-            elif message == 'Photos of H-201 please':
+            elif persist_user_message == 'Photos of H-201 please':
                 assert requested['ok']
                 assert 'documents' not in requested
                 assert requested['gallery_url'].endswith('/properties/H-201/gallery')
