@@ -213,3 +213,36 @@ def test_preference_and_visit_are_independent_state_dimensions():
     assert state['conversation_focus']['unit_id']=='H-204'
     assert state['visit_draft']['unit_id']=='H-201'
     assert not state.get('confirmation_request')
+
+
+def test_readonly_comparison_of_last_two_options_leaves_focus_unselected():
+    state=domain.blank_state()
+    domain.begin_turn(state,'Show me houses')
+    domain.end_turn(state,'H-201 (2 bedrooms) and H-204 (3 bedrooms) are available.')
+    domain.begin_turn(state,'Compare these two homes by area and price')
+    out=domain.compare_properties(state)
+    assert out['ok']
+    assert [p['unit_id'] for p in out['properties']]==['H-201','H-204']
+    assert out['differences']['H-204']['built_area_sqm_vs_first']==25
+    assert out['differences']['H-204']['price_usd_vs_first']==50000
+    assert out['selected_unit_id'] is None
+    assert state['conversation_focus']['unit_id'] is None
+    assert state['visit_draft']['unit_id'] is None
+
+
+def test_comparison_does_not_redirect_pending_visit_to_other_house():
+    state=domain.blank_state()
+    domain.begin_turn(state,'I want to visit H-201')
+    domain.end_turn(state,'For H-201, which day works?')
+    domain.begin_turn(state,'Compare H-201 with H-204')
+    out=domain.compare_properties(state, ['H-201','H-204'])
+    assert out['ok']
+    assert state['visit_draft']['unit_id']=='H-201'
+    assert state['conversation_phase']=='comparison'
+
+
+def test_comparison_rejects_unmentioned_inventory_units():
+    state=domain.blank_state()
+    domain.begin_turn(state,'Tell me about H-201')
+    invalid=domain.compare_properties(state,['H-201','H-104'])
+    assert invalid['error_code']=='COMPARISON_NOT_GROUNDED'
