@@ -196,6 +196,23 @@ def _begin_turn(state: dict, message: str) -> None:
     verified = domain.verify_explicit_preferences(state, message)
     if verified.get('error'):
         raise ValueError(verified['error'])
+    # Read-only prefetch of the single, contextually resolved public house
+    # record. This is NOT buyer interest, booking consent or media approval.
+    # The full facts are fed to Hermes; its final answer is still validated.
+    from app import conversation_context
+    ref=state.get('_turn_property_resolution') or {}
+    intent=conversation_context.topic(message)
+    if (ref.get('unit_id') and not ref.get('ambiguous') and
+            intent in ('area','price','bedrooms','bathrooms','kitchen',
+                       'backyard','parking','location','availability')):
+        details=domain.unit_details(state,ref['unit_id'])
+        if details.get('ok'):
+            state['_details_for_current_turn']=details
+            state.setdefault('tool_observations',[]).append({
+                'tool':'contextual_details_prefetch','status':'applied',
+                'fields':[intent,ref['unit_id']],
+                'message_id':state.get('_active_source_message_id'),
+                'timestamp':domain.now_local().isoformat()})
     selected=domain.capture_explicit_visit_time(state,message)
     if selected.get('captured'):
         state.setdefault('tool_observations',[]).append({
