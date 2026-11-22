@@ -1,4 +1,4 @@
-Hermes Agent Lab v13.3.2 — Upload Ready
-Integration: buyer-visible numbered property menus, ordinal selection, Turso state and SMS line-break preservation.
-Upload complete files from this ZIP directly through GitHub's Upload files interface.
-No installer, patch, migration or shell command required.
+Hermes Agent Lab v13.3.3 — typed contextual selectable lists and visit-day/time ordinal resolution
+Base repository: jorgektch/testing-hermes-agent
+Base main commit: cccc628b87e3aff6204630c65737dd988ad9cf92 (v13.3.2)
+Delivery: GitHub Upload Ready, full replacement/addition files, no runtime installer or SQL migration.

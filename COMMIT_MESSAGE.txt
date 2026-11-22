@@ -1,1 +1,1 @@
-fix(hermes): deliver v13.3.2 upload-ready option menus and SMS formatting
+fix(hermes): resolve numbered day, time and media choices contextually

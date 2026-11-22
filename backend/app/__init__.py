@@ -1,8 +1,6 @@
-"""Domain logic for the Hermes real-estate demo.
-
-Install the v13.3.2 upload-only integration before main imports domain and Hermes.
-No runtime installer, repository mutation or background migration is needed.
-"""
-from .v1332_upload_ready import install as _install_upload_ready
-_install_upload_ready()
-del _install_upload_ready
+"""Hermes Agent Lab integrations (upload-ready, no migrations or installers)."""
+from .v1332_upload_ready import install as _install_property_options
+_install_property_options()
+from .v1333_contextual_choices import install as _install_contextual_choices
+_install_contextual_choices()
+del _install_property_options, _install_contextual_choices
