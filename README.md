@@ -1,37 +1,24 @@
-# Hermes v13.3.1 — Corrección de integración
+# Hermes Agent Lab — v13.3.2 Upload Ready
 
-Esta entrega es un **diferencial para aplicar manualmente** sobre el commit v13.3 `ce58c928bacbf7621f252aaceb3acac4e06f9ca5`. No contiene un checkout completo. El archivo `apply.py` modifica los diez archivos descritos en [APPLY_INSTRUCTIONS.md](APPLY_INSTRUCTIONS.md).
+**Repositorio:** [`jorgektch/testing-hermes-agent`](https://github.com/jorgektch/testing-hermes-agent)
 
-## Funcionamiento tras aplicar
+Esta es una entrega lista para **GitHub → Add file → Upload files**. No requiere ejecutar `apply.py`, parches, scripts, comandos de terminal ni migraciones. Los archivos de este ZIP son archivos **completos**, organizados desde la raíz del repositorio.
 
-```mermaid
-flowchart TD
-    A[Lead solicita propiedades] --> B[Hermes interpreta intención]
-    B --> C[FastAPI consulta catálogo sintético]
-    C --> D[Validación: lista breve y numerada]
-    D --> E[Persistir mensaje y orden de opciones en Turso]
-    E --> F[Lead: The second option]
-    F --> G[Resolver 2 contra menú realmente enviado]
-    G --> H[Details de H-101]
-    H --> I{Próxima intención del lead}
-    I -->|Más datos, fotos o PDF| H
-    I -->|Más opciones| A
-    I -->|Visita| J[Verificar disponibilidad y pedir confirmación]
-```
+## Comportamiento de producción
 
-Hermes y el LLM son responsables del diálogo y la selección de herramientas. El backend mantiene contratos verificables: el catálogo es la fuente de propiedades y precios, el historial determina qué opciones se ofrecieron, el lead controla sus preferencias y solo el consentimiento explícito permite una reserva. Una elección de detalles no activa búsqueda ni calendario.
+1. El agente presenta las propiedades efectivamente coincidentes en líneas separadas: `1. H-204 (3 beds, $295k)` y `2. H-101 (3 beds, $320k)`. Una sola propiedad (H-201) se muestra sin `1.`.
+2. El menú presentado se guarda con orden, revisión de búsqueda e ID del mensaje en el estado persistido en Turso (`last_presented_property_options`). El agente no inventa precios ni usa un shortlist viejo para descifrar ordinales.
+3. Si el lead responde `The second option`, `Option 2`, `2` o `I choose the $320k house`, se resuelve **H-101** como `property_details`. No se hace nueva búsqueda, se mantienen preferencias, y no se reserva una visita.
+4. Un menú nuevo sustituye al anterior; una referencia inválida o ambigua exige aclaración antes de cualquier acción.
+5. Las respuestas preservan los saltos de línea reales en la proyección SMS, en los mensajes persistidos y en el historial de la interfaz. Los segmentos físicos GSM se calculan de manera independiente de la burbuja lógica.
+6. Hermes sigue eligiendo y ejecutando sus herramientas. El adaptador solamente aplica contratos verificables de referencias, presentación y seguridad comercial; no usa otro modelo extractor.
 
-**Ejemplo sintético de exploración:**
+## Arquitectura de integración
 
-```text
-I found 2 3-bedroom houses:
+`backend/app/__init__.py` carga al inicio `backend/app/v1332_upload_ready.py`, que vincula los módulos ya existentes de `domain`, `commercial_turn`, `conversation_context`, `delivery_policy`, `sms` y `hermes_runtime`. Se conserva la implementación productiva v13.3 de los demás módulos. La integración es explícita en el arranque y no necesita modificar los archivos del servidor de forma dinámica.
 
-1. H-204 (3 beds, $295k)
-2. H-101 (3 beds, $320k)
+## Pruebas
 
-Which would you like to explore? I can also look for homes with different features.
-```
+El archivo `backend/tests/test_v13_3_2_upload_ready.py` incluye los casos de selección ordinal, menú visible persistido, nuevo menú, privacidad de una cita en borrador, texto con saltos de línea y presentación sin ordinal de un único resultado. También deberían continuar pasando las pruebas preexistentes v13.3.
 
-Al seleccionar `2`, el sistema conserva la preferencia principal de 2 dormitorios, registra H-101 como propiedad en discusión, mueve la fase a `property_details` y mantiene sin cambios el borrador de cita. Se persisten los mensajes, la lista efectivamente presentada (`last_presented_property_options`), las preferencias con evidencia y la actividad comercial mediante la transacción normal de Turso; un nuevo menú sustituye al anterior. El frontend renderiza la lista y la proyección SMS conserva los saltos de línea.
-
-El README principal del repositorio también se actualiza **al aplicar** el diferencial. Consulta las instrucciones y las limitaciones de pruebas antes del commit.
+El ZIP no contiene credenciales, datos reales ni tareas automáticas. Los resultados con Hermes/OpenRouter y Turso reales necesitan comprobarse en tu despliegue después de subirlo.

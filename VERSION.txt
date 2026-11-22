@@ -1,3 +1,4 @@
-Hermes Agent Lab v13.3.1 — integrated property choices and compact listings
-Base Git commit: ce58c928bacbf7621f252aaceb3acac4e06f9ca5
-Requires a clean checkout; no network operations performed by apply.py.
+Hermes Agent Lab v13.3.2 — Upload Ready
+Integration: buyer-visible numbered property menus, ordinal selection, Turso state and SMS line-break preservation.
+Upload complete files from this ZIP directly through GitHub's Upload files interface.
+No installer, patch, migration or shell command required.

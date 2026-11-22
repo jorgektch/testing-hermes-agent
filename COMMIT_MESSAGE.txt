@@ -1,10 +1,1 @@
-fix(hermes): integrate property option selection and compact SMS listings
-
-- Connect property_options to commercial intent classification, conversation context,
-  state transitions, delivery validation, Hermes guidance and SMS formatting.
-- Persist buyer-visible option order and move ordinal selections to property
-  details without rerunning search, changing preferences or creating visits.
-- Render compact one-property and numbered multi-property menus with genuine
-  line breaks, and repair catalog/price mismatches before delivery.
-- Add regression coverage for "The second option", bare option numbers,
-  search-session stability, message formatting and idempotent installation.
+fix(hermes): deliver v13.3.2 upload-ready option menus and SMS formatting
